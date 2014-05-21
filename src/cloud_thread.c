@@ -13,9 +13,13 @@
 #define CLOUD_KEEPALIVE_TIME		30
 #define CLOUD_UPDATE_TIME			(24 * 3600)
 
-const char c_c8LanName[] = "p8p1"; /* <TODO> */
+#if HAS_CROSS
+const char c_c8LanName[] = "br0"; /* <TODO> */
 const char c_c8WifiName[] = "wlp2s0"; /* <TODO> */
-
+#else
+const char c_c8LanName[] = "p8p1";
+const char c_c8WifiName[] = "wlp2s0";
+#endif
 
 void *ThreadCloud(void *pArg)
 {

@@ -15,11 +15,77 @@
 #include <time.h>
 #include "upgrade.h"
 
-#if 1
+#if 0
+#include <sys/types.h>
+#include <unistd.h>
+#define TEST_SOCKET		"/tmp/test.sock"
+
+int main(int argc, char *argv[])
+{
+	if (argc > 1)	/* client */
+	{
+		int32_t s32Client, s32FD;
+		FILE *pFile = NULL;
+
+		printf("client in %d\n", getpid());
+
+		pFile = tmpfile();
+
+		if (argc < 2)
+		{
+			fwrite("send fd OK\n", sizeof("send fd OK\n"), 1, pFile);
+		}
+		else
+		{
+			fwrite(argv[1], strlen(argv[1]) + 1, 1, pFile);
+		}
+
+		s32FD = fileno(pFile);
+
+		s32Client = ClientConnect(TEST_SOCKET);
+
+		SendFd(s32Client, s32FD);
+
+		fclose(pFile);
+		close(s32Client);
+	}
+	else			/* server */
+	{
+		int32_t s32Server = ServerListen(TEST_SOCKET);
+		int32_t s32Client, s32FD;
+		char c8Buf[1024];
+		printf("server in %d\n", getpid());
+		while (1)
+		{
+			s32Client = ServerAccept(s32Server);
+
+			s32FD = ReceiveFd(s32Client);
+
+			printf("get fd %d\n", s32FD);
+			printf("press enter key to continue\n");
+			getchar();
+			lseek(s32FD, 0, SEEK_SET);
+			c8Buf[0] = 0;
+			read(s32FD, c8Buf, 1024);
+			printf("get message: %s\n", c8Buf);
+			close(s32FD);
+			close(s32Client);
+		}
+		printf("press enter key to exit\n");
+		getchar();
+		ServerRemove(s32Server, TEST_SOCKET);
+	}
+
+	return 0;
+}
+
+#endif
+
+#if 0
 int main()
 {
 	StCloudStat stStat = {false};
-	const char c8ID[PRODUCT_ID_CNT] = {"0123456789012345"};
+	const char c8ID[PRODUCT_ID_CNT] = {"01234567/9012345"};
 	const char c8Key[XXTEA_KEY_CNT_CHAR] = {"0123456789012345"};
 	CloudAuthentication(&stStat, c8ID, c8Key);
 	CloudKeepAlive(&stStat, c8ID);
@@ -66,19 +132,31 @@ int main()
 
 #endif
 
-#if 0
+#if 1
 //ebsnew.boc.cn/boc15/login.html
 //pbnj.ebank.cmbchina.com/CmbBank_GenShell/UI/GenShellPC/Login/Login.aspx
 //ebank.spdb.com.cn/per/gb/otplogin.jsp
 int main()
 {
-	StCloudStat stStat = { _Cloud_IsOnline, "10.0.0.101", "ebank.spdb.com.cn" };
+	StCloudStat stStat = { _Cloud_IsOnline, "10.0.0.110", "ebank.spdb.com.cn" };
 	StSendInfo  stInfo = { false, "per/gb/otplogin.jsp"};
 	StMMap stMMap = {NULL,};
 	int32_t s32Err;
-
-	StIPV4Addr stAddr[4];
-	uint32_t i, u32AddrSize = 4;
+#if 0
+	SSL_Init();
+	printf("network: %s, IP address: %s begin to try\n", "br0", stStat.c8ClientIPV4);
+	s32Err = CloudSendAndGetReturn(&stStat, &stInfo, &stMMap);
+	if (s32Err == 0)
+	{
+		FILE *pFile = fopen("login.jsp", "wb+");
+		fwrite(stMMap.pMap, stMMap.u32MapSize, 1, pFile);
+		fclose(pFile);
+		CloudMapRelease(&stMMap);
+	}
+	SSL_Destory();
+#else
+	StIPV4Addr stAddr[8];
+	uint32_t i, u32AddrSize = 8;
 
 
 
@@ -87,6 +165,7 @@ int main()
 	{
 		return -1;
 	}
+#if 1
 	SSL_Init();
 
 	for (i = 0; i < u32AddrSize; i++)
@@ -108,6 +187,8 @@ int main()
 	}
 
 	SSL_Destory();
+#endif
+#endif
 	return 0;
 }
 #endif

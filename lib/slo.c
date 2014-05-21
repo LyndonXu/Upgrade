@@ -122,7 +122,7 @@ int32_t SLOInit(const char *pName, uint16_t u16Capacity, uint32_t u32EntitySize,
 			(u32EntitySize + sizeof(StSLOCursor)) * u16Capacity;
 
 
-	PRINT("before aligning，the memory size is %d\n", u32MemSize);
+	PRINT("before aligning, the memory size is %d\n", u32MemSize);
 	/* integral multiple of the system's page size */
 	{
 		int32_t s32PageSize = getpagesize();

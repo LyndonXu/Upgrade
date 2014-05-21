@@ -11,8 +11,10 @@
 
 #include <net/if.h>
 #include <arpa/inet.h>
-#include <ifaddrs.h>
 #include <netdb.h>
+#include <linux/sockios.h>
+#include <fcntl.h>
+#include <sys/ioctl.h>
 
 #include "upgrade.h"
 
@@ -207,6 +209,86 @@ int32_t CheckSum(int32_t *pData, uint32_t u32Cnt)
  */
 int32_t GetIPV4Addr(StIPV4Addr *pAddrOut, uint32_t *pCnt)
 {
+#if 1
+	if ((pAddrOut == NULL) || (pCnt == NULL))
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	{
+	uint32_t u32Cnt = 0, i, u32NetworkCnt = 0;
+	char c8NewWork[16][16];
+	{
+	FILE *pFile;
+	char c8Buf[256];
+	c8Buf[0] = 0;
+
+	pFile = fopen("/proc/net/dev", "rb");
+	if (pFile == NULL)
+	{
+		return MY_ERR(_Err_SYS + errno);
+	}
+	fgets(c8Buf, 256, pFile);
+	fgets(c8Buf, 256, pFile);
+	while (fgets(c8Buf, 256, pFile) != NULL)
+	{
+		char *pTmp = strchr(c8Buf, ':');
+		if (pTmp == NULL)
+		{
+			continue;
+		}
+		*pTmp = 0;
+		sscanf(c8Buf, "%s", c8NewWork[u32Cnt]);
+		PRINT("network: %s\n", c8NewWork[u32Cnt]);
+		u32Cnt++;
+		if (u32Cnt >= 16)
+		{
+			break;
+		}
+	}
+	fclose(pFile);
+	}
+	for (i = 0; i < u32Cnt; i++)
+	{
+		struct ifreq stIfreq;
+		int32_t s32FD;
+		s32FD = socket(AF_INET, SOCK_DGRAM, 0);
+		if (s32FD < 0)
+		{
+			continue;
+		}
+
+		strncpy(stIfreq.ifr_name, c8NewWork[i], sizeof(stIfreq.ifr_name));
+		stIfreq.ifr_addr.sa_family = AF_INET;
+		if (ioctl(s32FD, SIOCGIFADDR, &stIfreq) == -1)
+		{
+			close(s32FD);
+			continue;
+		}
+		close(s32FD);
+		{
+		int32_t s32Rslt = getnameinfo(&stIfreq.ifr_addr, sizeof(struct sockaddr),
+				pAddrOut[u32NetworkCnt].c8IPAddr, 16, NULL,	0, NI_NUMERICHOST);
+		if (s32Rslt != 0)
+		{
+			PRINT("getnameinfo error: %s\n", strerror(errno));
+			continue;
+		}
+		}
+		strncpy(pAddrOut[u32NetworkCnt].c8Name, c8NewWork[i], 16);
+		PRINT("network :%s address: %s\n", c8NewWork[i], pAddrOut[u32NetworkCnt].c8IPAddr);
+		u32NetworkCnt++;
+		if (u32NetworkCnt >= (*pCnt))
+		{
+			return 0;
+		}
+	}
+	*pCnt = u32NetworkCnt;
+	return 0;
+	}
+
+
+#else	/* mips dos't supported */
+#include <ifaddrs.h>
 	struct ifaddrs *pInterfaceAddr, *pI;
 	int32_t s32Family;
 	uint32_t u32NetworkCnt = 0;
@@ -255,6 +337,7 @@ int32_t GetIPV4Addr(StIPV4Addr *pAddrOut, uint32_t *pCnt)
 	}
 	*pCnt = u32NetworkCnt;
 	freeifaddrs(pInterfaceAddr);
+#endif
 	return 0;
 }
 

@@ -871,6 +871,31 @@ err:
 
 #define TEST_CLOUD		0
 
+typedef struct _tagStIDPS
+{
+	char c8ProtocolString[16];					/* com.jiuan.HG3 */
+	char c8AccessoryName[16];					/* HG3 */
+	char c8AccessoryFirmware[3];				/* 1.0.0 */
+	char c8AccessoryHardware[3];				/* 1.0.1 */
+	char c8AccessoryManufacturer[16];			/* HG3 */
+	char c8AccessoryModelNumber[16];			/* HG3 12312 */
+	char c8AccessorySerialNumber[16];			/* 128912387145897 */
+
+}StIDPS;
+/*
+ * 函数名      : CloudSendIDPS
+ * 功能        : 发送IDPS
+ * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ *             : pIDPS [in] (StIDPS * 类型): 产品IDPS
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudSendIDPS(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT], const char c8Key[XXTEA_KEY_CNT_CHAR])
+{
+	return 0;
+}
+
+
 /*
  * 函数名      : CloudAuthentication
  * 功能        : 云认证

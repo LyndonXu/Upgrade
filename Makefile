@@ -22,6 +22,8 @@ ifeq ($(CROSS), )
 OPENSSL_DIR = ../openssllib_x86/
 JSON_DIR = ../jsonlib_x86/
 else
+OPENSSL_DIR = ../openssllib_mips/
+JSON_DIR = ../jsonlib_mips/
 endif
 
 
@@ -36,6 +38,12 @@ PROJECT = $(notdir $(CURDIR))
 
 #compile parameters
 CDEF += -D_DEBUG
+ifeq ($(CROSS), )
+CDEF += -DHAS_CROSS=0
+else
+CDEF += -DHAS_CROSS=1
+endif
+
 
 CFLAGS += -O0 -g3 -Wall $(INC_FLAGS) $(CDEF)
 ifeq ($(CROSS), )

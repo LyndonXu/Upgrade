@@ -474,6 +474,10 @@ void ServerRemove(int32_t s32Socket, const char *pName);
  */
 int32_t ClientConnect(const char *pName);
 
+int32_t SendFd(int32_t s32Socket, int32_t s32Fd);
+int32_t ReceiveFd(int32_t s32Socket);
+
+
 /*
  * 函数名      : ProcessListInit
  * 功能        : 初始化进程维护表在该进程空间的资源，并将该进程信息插入到表中

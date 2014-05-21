@@ -40,13 +40,13 @@ int32_t ServerListen(const char *pName)
     /* 绑定关联文件到套接字 */
     if (bind(s32Fd, (struct sockaddr*) (&stUn), u32Len) < 0)
     {
-        PRINT("Bind the socket error: %s", strerror(errno));
+        PRINT("Bind the socket error: %s\n", strerror(errno));
         s32Rval = MY_ERR(_Err_SYS + errno);
         goto err;
     }
     if (listen(s32Fd, MAX_LISTEN_QUEUE) < 0)
     {
-        PRINT("Listen the socket error: %s", strerror(errno));
+        PRINT("Listen the socket error: %s\n", strerror(errno));
         s32Rval = MY_ERR(_Err_SYS + errno);
         goto err;
     }
@@ -71,7 +71,7 @@ int32_t ServerAccept(int32_t s32ListenFd)
     u32Len = sizeof(stUn);
     if ((s32ClientFd = accept(s32ListenFd, (struct sockaddr *) (&stUn), &u32Len)) < 0)
     {
-        PRINT("Accept the socket error: %s", strerror(errno));
+        PRINT("Accept the socket error: %s\n", strerror(errno));
         return MY_ERR(_Err_SYS + errno);
     }
     return s32ClientFd;
@@ -140,3 +140,92 @@ err:
 	return s32Rval;
 }
 
+#define PROCESS_FD			"ProcessFD"
+#define CONTROLLEN			CMSG_LEN(sizeof(int))
+
+int32_t SendFd(int32_t s32Socket, int32_t s32Fd)
+{
+
+	if ((s32Fd < 0) || (s32Socket < 0))
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	else
+	{
+		struct iovec	stIOV[1];
+		struct msghdr	stMsg;
+		struct cmsghdr	*pCmptr;
+		const char *pStr = PROCESS_FD;
+		char c8Buf[CONTROLLEN] = {0};
+
+		stIOV[0].iov_base = (void *)pStr;
+		stIOV[0].iov_len  = sizeof(PROCESS_FD);
+		stMsg.msg_iov     = stIOV;
+		stMsg.msg_iovlen  = 1;
+		stMsg.msg_name    = NULL;
+		stMsg.msg_namelen = 0;
+
+		pCmptr = (struct cmsghdr *)c8Buf;
+
+		pCmptr->cmsg_level  = SOL_SOCKET;
+		pCmptr->cmsg_type   = SCM_RIGHTS;
+		pCmptr->cmsg_len    = CONTROLLEN;
+		*(int32_t *)CMSG_DATA(pCmptr) = s32Fd;		/* the fd to pass */
+
+		stMsg.msg_control    = pCmptr;
+		stMsg.msg_controllen = CONTROLLEN;
+		if (sendmsg(s32Socket, &stMsg, MSG_NOSIGNAL) != sizeof(PROCESS_FD))
+		{
+			PRINT("sendmsg error: %s\n", strerror(errno));
+			return MY_ERR(_Err_SYS + errno);
+		}
+	}
+	return 0;
+}
+
+
+int32_t ReceiveFd(int32_t s32Socket)
+{
+
+	if (s32Socket < 0)
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	else
+	{
+		struct iovec	stIOV[1];
+		struct msghdr	stMsg;
+		struct cmsghdr	*pCmptr;
+		char c8Str[sizeof(PROCESS_FD)] = {0};
+		char c8Buf[CONTROLLEN] = {0};
+
+		stIOV[0].iov_base = (void *)c8Str;
+		stIOV[0].iov_len  = sizeof(PROCESS_FD);
+		stMsg.msg_iov     = stIOV;
+		stMsg.msg_iovlen  = 1;
+		stMsg.msg_name    = NULL;
+		stMsg.msg_namelen = 0;
+
+		pCmptr = (struct cmsghdr *)c8Buf;
+
+		stMsg.msg_control    = pCmptr;
+		stMsg.msg_controllen = CONTROLLEN;
+		if (recvmsg(s32Socket, &stMsg, 0) < 0)
+		{
+			PRINT("recvmsg error: %s\n", strerror(errno));
+			return MY_ERR(_Err_SYS + errno);
+		}
+
+		if (strcmp(c8Str, PROCESS_FD) != 0)
+		{
+			PRINT("recvmsg str error: %s\n", c8Str);
+			return MY_ERR(_Err_CmdType);
+		}
+		else
+		{
+			int32_t s32FD = (*(int32_t *)CMSG_DATA(pCmptr));
+			lseek(s32FD, 0, SEEK_SET);
+			return s32FD;
+		}
+	}
+}

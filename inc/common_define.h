@@ -61,7 +61,7 @@
 
 
 #if HAS_CROSS
-#define WORK_DIR		"/var/mytestdir/"
+#define WORK_DIR		"/tmp/mytestdir/"
 #else
 #define WORK_DIR		"/tmp/mytestdir/"
 #endif
@@ -387,15 +387,15 @@ typedef struct _tagStCloudHandle		/* 与StSLOHandle类似 */
 enum
 {
 	_Err_Identification = 0x01,
-	_Err_Handle = 0x02,
-	_Err_InvalidParam = 0x03,
-	_Err_CmdLen = 0x04,
-	_Err_CmdType = 0x05,
-	_Err_NULLPtr = 0x06,
+	_Err_Handle,
+	_Err_InvalidParam ,
+	_Err_CmdLen,
+	_Err_CmdType,
+	_Err_NULLPtr,
 	_Err_Time,
-	_Err_Mem = 0x0c,
-	_Err_NoneCmdData = 0x0e,
-	_Err_TimeOut = 0x0F,
+	_Err_Mem,
+	_Err_NoneCmdData ,
+	_Err_TimeOut,
 
 	_Err_SLO_NoSpace = 0x100,
 	_Err_SLO_NoElement,
