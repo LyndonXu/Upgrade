@@ -82,8 +82,8 @@ int main(int argc, char *argv[])
 
 	ThreadStat(NULL);
 
-	g_boIsExit = true;
 end:
+	g_boIsExit = true;
 	if (s32LogServerPid != 0)
 	{
 		pthread_join(s32LogServerPid, NULL);

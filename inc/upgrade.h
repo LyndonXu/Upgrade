@@ -312,7 +312,7 @@ int32_t MCSInsertACmdWithNoCopy(int32_t s32MCSHandle,
         const void *pCmdData,
         bool boIsRepeatCmd);
 /*
- * 函数名      : MCSResolve
+ * 函数名      : MCSGetCmdLength
  * 功能        : 从MCS流中得到负载的命令大小
  * 参数        : pMCS[in] (const char * 类型): 指向命令流
  *             : pMCSCmdSize[out] (uint32_t *类型): 成功在*pMCSCmdSize中保存大小
@@ -320,6 +320,15 @@ int32_t MCSInsertACmdWithNoCopy(int32_t s32MCSHandle,
  * 作者        : 许龙杰
  */
 int32_t MCSGetCmdLength(const char *pMCS, uint32_t *pMCSCmdSize);
+/*
+ * 函数名      : MCSGetCmdCnt
+ * 功能        : 从MCS流中得到负载的命令数量
+ * 参数        : pMCS[in] (const char * 类型): 指向命令流
+ *             : pMCSCmdCnt[out] (uint32_t *类型): 成功在*pMCSCmdCnt中保存大小
+ * 返回值      : int32_t 型数据, 0成功, 否则失败
+ * 作者        : 许龙杰
+ */
+int32_t MCSGetCmdCnt(const char *pMCS, uint32_t *pMCSCmdCnt);
 /*
  * 函数名      : MCSResolve
  * 功能        : 解析命令流
@@ -337,13 +346,14 @@ int32_t MCSResolve(const char *pMCS, uint32_t u32MCSSize, PFUN_MCS_Resolve_CallB
  * 函数名      : MCSSyncReceive
  * 功能        : 以MCS头作为同步头从SOCKET中接收数据, 与 MCSSyncFree成对使用
  * 参数        : s32Socket[in] (int32_t类型): 要接收的SOCKET
+ *             : boWantSyncHead [in] (bool类型): 是否希望在数据前端增加同步头
  *             : u32TimeOut[in] (uint32_t类型): 超时时间(ms)
  *             : pSize[out] (uint32_t * 类型): 保存数据的长度
  *             : pErr[out] (int32_t * 类型): 不为NULL时, *pErr中保存错误码
  * 返回值      : int32_t 型数据, 0成功, 否则失败
  * 作者        : 许龙杰
  */
-void *MCSSyncReceive(int32_t s32Socket, uint32_t u32TimeOut, uint32_t *pSize, int32_t *pErr);
+void *MCSSyncReceive(int32_t s32Socket, bool boWantSyncHead, uint32_t u32TimeOut, uint32_t *pSize, int32_t *pErr);
 
 /*
  * 函数名      : MCSSyncFree
@@ -366,6 +376,18 @@ void MCSSyncFree(void *pData);
  * 作者        : 许龙杰
  */
 int32_t MCSSyncSend(int32_t s32Socket,  uint32_t u32TimeOut, uint32_t u32CommandNum, uint32_t u32Size, const void *pData);
+
+/*
+ * 函数名      : MCSSyncSendData
+ * 功能        : 以MCS头作为同步头向SOCKET中发送数据
+ * 参数        : s32Socket[in] (int32_t类型): 要放送到的SOCKET
+ *             : u32TimeOut[in] (uint32_t类型): 超时(ms)
+ *             : u32Size[in] (uint32_t 类型): 数据的长度
+ *             : pData[in] (const void * 类型): 数据
+ * 返回值      : int32_t 型数据, 0成功, 否则失败
+ * 作者        : 许龙杰
+ */
+int32_t MCSSyncSendData(int32_t s32Socket,  uint32_t u32TimeOut, uint32_t u32Size, const void *pData);
 
 /*
  * 函数名      : MCSSyncSendV
@@ -775,8 +797,14 @@ typedef struct _tagStIPV4Addr
  */
 int32_t GetIPV4Addr(StIPV4Addr *pAddrOut, uint32_t *pCnt);
 
-
-
+/*
+ * 函数名      : TimeGetTime
+ * 功能        : 得到当前系统时间 (MS级)
+ * 参数        : 无
+ * 返回值      : 当前系统时间ms
+ * 作者        : 许龙杰
+ */
+uint64_t TimeGetTime(void);
 
 #ifdef __cplusplus
 }

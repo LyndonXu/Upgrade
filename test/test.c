@@ -15,60 +15,171 @@
 #include <time.h>
 #include "upgrade.h"
 
+#if 1
+#define TEST_CNT	4096
+#if 1 /* mmap memory file */
+#include <sys/mman.h>
+#include <unistd.h>
+int main()
+{
+	char c8Buf[4096] = {0};
+	int32_t i, s32Cnt;
+	FILE *pFile;
+	int32_t s32Fd;
+	void *pMapAddr = NULL;
+	uint64_t u64Tmp;
+	uint64_t u64Time;
+
+	for (i = 0; i < 4095; i++)
+	{
+		c8Buf[i] = rand() % 94 + ' ';
+	}
+	c8Buf[i] = 0;
+
+	pFile = tmpfile();
+	s32Fd = fileno(pFile);
+
+	ftruncate(s32Fd, 4096);
+
+	pMapAddr = mmap(0, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, s32Fd, 0);
+
+	u64Time = TimeGetTime();
+	s32Cnt = 0;
+	while (s32Cnt < TEST_CNT)
+	{
+		memcpy(pMapAddr, c8Buf, 4096);
+		memcpy(c8Buf, pMapAddr, 4096);
+		s32Cnt++;
+	}
+	u64Time = TimeGetTime() - u64Time;
+	printf("mmap: %d, time using %lldms\n", TEST_CNT, u64Time);
+	munmap(pMapAddr, 4096);
+	fclose(pFile);
+	u64Tmp = (uint64_t)4096 * 2 * TEST_CNT * 1000 * 100;
+	u64Tmp /= u64Time;
+	u64Tmp /= 1024;
+	u64Tmp /= 1024;
+	printf("copy speed %lld.%02lldM/s\n", u64Tmp / 100, u64Tmp % 100);
+
+	return 0;
+}
+#else
+int main()
+{
+	char c8Buf[4096] = {0};
+	int32_t i, s32Cnt;
+	void *pMapAddr = NULL;
+	uint64_t u64Tmp;
+	uint64_t u64Time;
+
+	for (i = 0; i < 4095; i++)
+	{
+		c8Buf[i] = rand() % 94 + ' ';
+	}
+	pMapAddr = malloc(4096);
+	u64Time = TimeGetTime();
+	s32Cnt = 0;
+	while (s32Cnt < TEST_CNT)
+	{
+		memcpy(pMapAddr, c8Buf, 4096);
+		memcpy(c8Buf, pMapAddr, 4096);
+		s32Cnt++;
+	}
+	u64Time = TimeGetTime() - u64Time;
+	printf("memory: %d, time using %lldms\n", TEST_CNT, u64Time);
+	u64Tmp = (uint64_t)4096 * 2 * TEST_CNT * 1000 * 100;
+	u64Tmp /= u64Time;
+	u64Tmp /= 1024;
+	u64Tmp /= 1024;
+	printf("copy speed %lld.%02lldM/s\n", u64Tmp / 100, u64Tmp % 100);
+	free(pMapAddr);
+	return 0;
+}
+#endif
+#endif
+
 #if 0
 #include <sys/types.h>
+#include <sys/time.h>
 #include <unistd.h>
 #define TEST_SOCKET		"/tmp/test.sock"
+#define TEST_FD			0
 
 int main(int argc, char *argv[])
 {
+	char c8Buf[4096] = {0};
+	int32_t i;
+	for (i = 0; i < 4095; i++)
+	{
+		c8Buf[i] = rand() % 94 + ' ';
+	}
+	c8Buf[i] = 0;
 	if (argc > 1)	/* client */
 	{
-		int32_t s32Client, s32FD;
+		int32_t s32Client;
+#if TEST_FD
+		int32_t s32FD;
 		FILE *pFile = NULL;
-
+#endif
+		int32_t s32Cnt = 0;
+		uint64_t u64TimeEnd;
+		uint64_t u64Time = TimeGetTime();
 		printf("client in %d\n", getpid());
-
+#if TEST_FD
 		pFile = tmpfile();
-
-		if (argc < 2)
+		fwrite(c8Buf, 4096, 1, pFile);
+#endif
+		while (s32Cnt < 4096)
 		{
-			fwrite("send fd OK\n", sizeof("send fd OK\n"), 1, pFile);
+#if TEST_FD
+
+
+			s32FD = fileno(pFile);
+			s32Client = ClientConnect(TEST_SOCKET);
+			SendFd(s32Client, s32FD);
+
+#else
+			s32Client = ClientConnect(TEST_SOCKET);
+			MCSSyncSendData(s32Client, 1000, 4096, c8Buf);
+			close(s32Client);
+#endif
+			close(s32Client);
+			s32Cnt++;
 		}
-		else
-		{
-			fwrite(argv[1], strlen(argv[1]) + 1, 1, pFile);
-		}
-
-		s32FD = fileno(pFile);
-
-		s32Client = ClientConnect(TEST_SOCKET);
-
-		SendFd(s32Client, s32FD);
-
+#if 0
 		fclose(pFile);
-		close(s32Client);
+#endif
+		u64TimeEnd = TimeGetTime();
+		printf("time using %lldms\n", u64TimeEnd - u64Time);
 	}
 	else			/* server */
 	{
 		int32_t s32Server = ServerListen(TEST_SOCKET);
-		int32_t s32Client, s32FD;
-		char c8Buf[1024];
+		int32_t s32Client;
+#if TEST_FD
+		int32_t s32FD;
+#endif
 		printf("server in %d\n", getpid());
 		while (1)
 		{
 			s32Client = ServerAccept(s32Server);
 
+#if TEST_FD
 			s32FD = ReceiveFd(s32Client);
 
-			printf("get fd %d\n", s32FD);
-			printf("press enter key to continue\n");
-			getchar();
-			lseek(s32FD, 0, SEEK_SET);
-			c8Buf[0] = 0;
-			read(s32FD, c8Buf, 1024);
-			printf("get message: %s\n", c8Buf);
+			//printf("get fd %d\n", s32FD);
+			//printf("press enter key to continue\n");
+			//getchar();
+			//lseek(s32FD, 0, SEEK_SET);
+			//c8Buf[0] = 0;
+			read(s32FD, c8Buf, 4096);
+			//printf("get message: %s\n", c8Buf);
 			close(s32FD);
+#else
+			uint32_t u32Size;
+			void *pBuf = MCSSyncReceive(s32Client,false, 1000, &u32Size, NULL);
+			MCSSyncFree(pBuf);
+#endif
 			close(s32Client);
 		}
 		printf("press enter key to exit\n");
@@ -132,7 +243,7 @@ int main()
 
 #endif
 
-#if 1
+#if 0
 //ebsnew.boc.cn/boc15/login.html
 //pbnj.ebank.cmbchina.com/CmbBank_GenShell/UI/GenShellPC/Login/Login.aspx
 //ebank.spdb.com.cn/per/gb/otplogin.jsp

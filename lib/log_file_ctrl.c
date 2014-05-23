@@ -157,7 +157,7 @@ StFileCtrl *FileCtrlInit(const char *pName, uint32_t u32MaxCnt, int32_t *pErr)
 			/* get the valid text position */
 			{
 				int32_t s32Left = -1, s32Right = u32Tmp;
-				int32_t s32Pos;
+				int32_t s32Pos = 0;
 				boFind = false;
 				while (s32Left < s32Right)
 				{

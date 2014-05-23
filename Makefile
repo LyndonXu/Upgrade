@@ -4,6 +4,7 @@
 #    include $(PARAM_FILE)
 #endif
 
+DEBUG = 1
 
 SYS_BIT = 64
 #SYS_BIT = `getconf LONG_BIT`
@@ -34,18 +35,27 @@ INC_FLAGS += -I $(JSON_DIR)include
 
 PROJECT = $(notdir $(CURDIR))
 
-#INSTALL_DIR = 
+INSTALL_DIR = ../nfsboot/
 
 #compile parameters
+ifeq ($(DEBUG), 1)
 CDEF += -D_DEBUG
+endif
+
 ifeq ($(CROSS), )
 CDEF += -DHAS_CROSS=0
 else
 CDEF += -DHAS_CROSS=1
 endif
 
+ifeq ($(DEBUG), 1)
+CFLAGS += -O0 -g3
+else
+CFLAGS += -O3
+endif
 
-CFLAGS += -O0 -g3 -Wall $(INC_FLAGS) $(CDEF)
+
+CFLAGS += -Wall $(INC_FLAGS) $(CDEF)
 ifeq ($(CROSS), )
 ifeq ($(SYS_BIT), 64)
 CFLAGS += -m32 
@@ -128,10 +138,10 @@ cleanall:
 	
 install:
 	@mkdir -p $(INSTALL_DIR)	
-	@cp $(LIB_TARGET) inc/ycs.h $(INSTALL_DIR)
+	@cp $(LIB_TARGET) inc/$(PROJECT).h $(INSTALL_DIR)
 
 uninstall:
-	@rm -rf $(INSTALL_DIR)$(LIB_TARGET) $(INSTALL_DIR)ycs.h
+	@rm -rf $(INSTALL_DIR)$(LIB_TARGET) $(INSTALL_DIR)$(PROJECT).h
 
 DATE=`date +%Y%m%d%H%M%S`
 NAME=backup_$(DATE).tar.bz2

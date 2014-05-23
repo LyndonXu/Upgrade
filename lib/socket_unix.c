@@ -170,7 +170,10 @@ int32_t SendFd(int32_t s32Socket, int32_t s32Fd)
 		pCmptr->cmsg_level  = SOL_SOCKET;
 		pCmptr->cmsg_type   = SCM_RIGHTS;
 		pCmptr->cmsg_len    = CONTROLLEN;
-		*(int32_t *)CMSG_DATA(pCmptr) = s32Fd;		/* the fd to pass */
+		{
+		int32_t *pTmp = (int32_t *)(CMSG_DATA(pCmptr));
+		*pTmp = s32Fd;		/* the fd to pass */
+		}
 
 		stMsg.msg_control    = pCmptr;
 		stMsg.msg_controllen = CONTROLLEN;
@@ -223,7 +226,8 @@ int32_t ReceiveFd(int32_t s32Socket)
 		}
 		else
 		{
-			int32_t s32FD = (*(int32_t *)CMSG_DATA(pCmptr));
+			int32_t *pTmp = (int32_t *)(CMSG_DATA(pCmptr));
+			int32_t s32FD = *pTmp;
 			lseek(s32FD, 0, SEEK_SET);
 			return s32FD;
 		}

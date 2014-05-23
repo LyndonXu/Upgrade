@@ -11,7 +11,7 @@
 #include "upgrade.h"
 
 
-const uint8_t c_u8MixArr[4] = {0x59, 0x43, 0x53, 0x01};
+const uint8_t c_u8MixArr[4] = {0x4D, 0x43, 0x53, 0x01};
 
 /*
  * 函数名      : LittleAndBigEndianTransfer
@@ -539,7 +539,7 @@ const char *MCSGetStreamBuf(int32_t s32MCSHandle, uint32_t *pSize, int32_t *pErr
 }
 
 /*
- * 函数名      : MCSResolve
+ * 函数名      : MCSGetCmdLength
  * 功能        : 从MCS流中得到负载的命令大小
  * 参数        : pMCS[in] (const char * 类型): 指向命令流
  *             : pMCSCmdSize[out] (uint32_t *类型): 成功在*pMCSCmdSize中保存大小
@@ -558,14 +558,51 @@ int32_t MCSGetCmdLength(const char *pMCS, uint32_t *pMCSCmdSize)
         return MY_ERR(_Err_NULLPtr);
     }
 
-    memcpy(&u32Tmp, c_u8MixArr, sizeof(c_u8MixArr));
-    memcpy(&u32Tmp1, pMCS, sizeof(c_u8MixArr));
+    u32Tmp = *((uint32_t *)c_u8MixArr);
+    u32Tmp1 = *((uint32_t *)pMCS);
+
+    /* memcpy(&u32Tmp, c_u8MixArr, sizeof(c_u8MixArr));
+    memcpy(&u32Tmp1, pMCS, sizeof(c_u8MixArr)); */
 
     if (u32Tmp != u32Tmp1)/* 表示以及版本错误 */
     {
         return MY_ERR(_Err_Identification);
     }
     LittleAndBigEndianTransfer((char *)pMCSCmdSize, pMCS + 8, sizeof(uint32_t));
+    return 0;
+}
+
+/*
+ * 函数名      : MCSGetCmdCnt
+ * 功能        : 从MCS流中得到负载的命令数量
+ * 参数        : pMCS[in] (const char * 类型): 指向命令流
+ *             : pMCSCmdCnt[out] (uint32_t *类型): 成功在*pMCSCmdCnt中保存大小
+ * 返回值      : int32_t 型数据, 0成功, 否则失败
+ * 作者        : 许龙杰
+ */
+int32_t MCSGetCmdCnt(const char *pMCS, uint32_t *pMCSCmdCnt)
+{
+    uint32_t u32Tmp, u32Tmp1;
+    if (NULL == pMCS )
+    {
+        return MY_ERR(_Err_Handle);
+    }
+    if (NULL == pMCSCmdCnt)
+    {
+        return MY_ERR(_Err_NULLPtr);
+    }
+
+    u32Tmp = *((uint32_t *)c_u8MixArr);
+    u32Tmp1 = *((uint32_t *)pMCS);
+
+    /* memcpy(&u32Tmp, c_u8MixArr, sizeof(c_u8MixArr));
+    memcpy(&u32Tmp1, pMCS, sizeof(c_u8MixArr)); */
+
+    if (u32Tmp != u32Tmp1)/* 表示以及版本错误 */
+    {
+        return MY_ERR(_Err_Identification);
+    }
+    LittleAndBigEndianTransfer((char *)pMCSCmdCnt, pMCS + 4, sizeof(uint32_t));
     return 0;
 }
 
@@ -617,11 +654,25 @@ int32_t MCSResolve(const char *pMCS, uint32_t u32MCSSize, PFUN_MCS_Resolve_CallB
         }
         u32MCSSize += sizeof(StMCSHeader);  /* 得到MCS命令流的大小 */
     }
-
 #endif
+
+    {
+	int32_t s32Err;
+	/* 得到MCS命令流中的命令数量 */
+	if ((s32Err = MCSGetCmdCnt(pMCS, &u32Tmp)) != 0)
+	{
+		return s32Err;
+	}
+    }
+
     pMCSEnd = pMCS + u32MCSSize;
 
     pMCS += sizeof(StMCSHeader);
+
+    if (u32Tmp == 0)	/* 只有数据 */
+    {
+    	return pFunCallBack(0, 1, u32MCSSize - sizeof(StMCSHeader), pMCS, pContext);
+    }
 
     while(pMCS < pMCSEnd)
     {
@@ -645,8 +696,6 @@ int32_t MCSResolve(const char *pMCS, uint32_t u32MCSSize, PFUN_MCS_Resolve_CallB
         pMCS += u32Tmp1 * u32Tmp2;
 
     }
-
-
     return 0;
 }
 
@@ -655,13 +704,14 @@ int32_t MCSResolve(const char *pMCS, uint32_t u32MCSSize, PFUN_MCS_Resolve_CallB
  * 函数名      : MCSSyncReceive
  * 功能        : 以MCS头作为同步头从SOCKET中接收数据, 与 MCSSyncFree成对使用
  * 参数        : s32Socket[in] (int32_t类型): 要接收的SOCKET
+ *             : boWantSyncHead [in] (bool类型): 是否希望在数据前端增加同步头
  *             : u32TimeOut[in] (uint32_t类型): 超时时间(ms)
  *             : pSize[out] (uint32_t * 类型): 保存数据的长度
  *             : pErr[out] (int32_t * 类型): 不为NULL时, *pErr中保存错误码
  * 返回值      : int32_t 型数据, 0成功, 否则失败
  * 作者        : 许龙杰
  */
-void *MCSSyncReceive(int32_t s32Socket, uint32_t u32TimeOut, uint32_t *pSize, int32_t *pErr)
+void *MCSSyncReceive(int32_t s32Socket, bool boWantSyncHead, uint32_t u32TimeOut, uint32_t *pSize, int32_t *pErr)
 {
     void *pMCSStream = NULL;
     char c8MCSHeader[16];
@@ -723,7 +773,13 @@ void *MCSSyncReceive(int32_t s32Socket, uint32_t u32TimeOut, uint32_t *pSize, in
     {
         goto end;
     }
-    u32Size = u32RemainLen + sizeof(c8MCSHeader);
+
+    u32Size = u32RemainLen;
+    if (boWantSyncHead)
+    {
+		u32Size += sizeof(c8MCSHeader);
+    }
+
     pMCSStream = malloc(u32Size);
     if (NULL == pMCSStream)
     {
@@ -732,7 +788,12 @@ void *MCSSyncReceive(int32_t s32Socket, uint32_t u32TimeOut, uint32_t *pSize, in
         goto end;
     }
 
-    pTmp = pMCSStream + sizeof(c8MCSHeader);
+    pTmp = pMCSStream;
+    if (boWantSyncHead)
+    {
+    	pTmp += sizeof(c8MCSHeader);
+    }
+
     s32RecvLen = 0;
     while ((int32_t) u32RemainLen > 0)/* 接收数据 */
     {
@@ -748,7 +809,10 @@ void *MCSSyncReceive(int32_t s32Socket, uint32_t u32TimeOut, uint32_t *pSize, in
         u32RemainLen -= s32RecvLen;
         pTmp += s32RecvLen;
     }
-    memcpy(pMCSStream, c8MCSHeader, sizeof(c8MCSHeader));/* 组装成一个完整的MCS流 */
+    if (boWantSyncHead)
+    {
+    	memcpy(pMCSStream, c8MCSHeader, sizeof(c8MCSHeader));/* 组装成一个完整的MCS流 */
+    }
 end:
     *pSize = u32Size;
     if (pErr != NULL)
@@ -775,7 +839,7 @@ void MCSSyncFree(void *pData)
 
 /*
  * 函数名      : MCSSyncSend
- * 功能        : 以MCS头作为同步头向SOCKET中发送数据
+ * 功能        : 以MCS头作为同步头向SOCKET中发送命令数据
  * 参数        : s32Socket[in] (int32_t类型): 要放送到的SOCKET
  *             : u32TimeOut[in] (uint32_t类型): 超时(ms)
  *             : u32CommandNum[in] (uint32_t 类型): 数据对应的命令号(根据情况可以添0)
@@ -847,6 +911,76 @@ int32_t MCSSyncSend(int32_t s32Socket,  uint32_t u32TimeOut, uint32_t u32Command
         }
     }
 
+end:
+    return s32Err;
+}
+
+
+/*
+ * 函数名      : MCSSyncSendData
+ * 功能        : 以MCS头作为同步头向SOCKET中发送数据
+ * 参数        : s32Socket[in] (int32_t类型): 要放送到的SOCKET
+ *             : u32TimeOut[in] (uint32_t类型): 超时(ms)
+ *             : u32Size[in] (uint32_t 类型): 数据的长度
+ *             : pData[in] (const void * 类型): 数据
+ * 返回值      : int32_t 型数据, 0成功, 否则失败
+ * 作者        : 许龙杰
+ */
+int32_t MCSSyncSendData(int32_t s32Socket,  uint32_t u32TimeOut, uint32_t u32Size, const void *pData)
+{
+    int32_t s32Err = 0;
+    uint32_t u32Tmp = 0;
+    char c8HeaderMix[sizeof(StMCSHeader)] = {0};
+    StMCSHeader *pMCSHeader;
+    struct timeval stTimeout;
+
+    if (s32Socket <= 0)
+    {
+        return MY_ERR(_Err_InvalidParam);
+    }
+
+    pMCSHeader = (StMCSHeader *)c8HeaderMix;
+    memcpy(pMCSHeader->u8MixArr, c_u8MixArr, sizeof(c_u8MixArr));
+
+    u32Tmp = 0;
+    LittleAndBigEndianTransfer((char *)(&(pMCSHeader->u32CmdCnt)),
+            (char *)(&u32Tmp), sizeof(uint32_t));
+
+    u32Tmp = u32Size;
+    LittleAndBigEndianTransfer((char *)(&(pMCSHeader->u32CmdTotalSize)),
+            (char *)(&u32Tmp), sizeof(uint32_t));
+
+
+    /* 设置套接字选项,接收和发送超时时间 */
+    stTimeout.tv_sec  = u32TimeOut / 1000;
+    stTimeout.tv_usec = (u32TimeOut % 1000) * 1000;
+    if(setsockopt(s32Socket, SOL_SOCKET, SO_RCVTIMEO, &stTimeout, sizeof(struct timeval)) < 0)
+    {
+        close(s32Socket);
+        return MY_ERR(_Err_SYS + errno);
+    }
+
+    if(setsockopt(s32Socket, SOL_SOCKET, SO_SNDTIMEO, &stTimeout, sizeof(struct timeval)) < 0)
+    {
+        close(s32Socket);
+        return MY_ERR(_Err_SYS + errno);
+    }
+
+    u32Tmp = send(s32Socket, c8HeaderMix, sizeof(c8HeaderMix), MSG_NOSIGNAL);
+    if (u32Tmp != sizeof(c8HeaderMix))
+    {
+        s32Err = MY_ERR(_Err_SYS + errno);
+        goto end;
+    }
+    if (pData != NULL)
+    {
+        u32Tmp = send(s32Socket, pData, u32Size, MSG_NOSIGNAL);
+        if (u32Tmp != u32Size)
+        {
+            s32Err = MY_ERR(_Err_SYS + errno);
+            goto end;
+        }
+    }
 end:
     return s32Err;
 }

@@ -80,8 +80,8 @@ int32_t PrintLog(const char *pFmt, ...)
 			return s32Client;
 		}
 
-		s32Err = MCSSyncSend(s32Client, 1000, 0x00006001, u32Size, c8StrMax);
-
+		//s32Err = MCSSyncSend(s32Client, 1000, 0x00006001, u32Size, c8StrMax);
+		s32Err = MCSSyncSendData(s32Client, 1000, u32Size, c8StrMax);
 		close(s32Client);
 	}
 #else

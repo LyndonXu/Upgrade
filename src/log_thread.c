@@ -12,23 +12,24 @@
 
 
 #if 1
-
+#if 0
 static int32_t MCSCallBack(uint32_t u32CmdNum, uint32_t u32CmdCnt, uint32_t u32CmdSize,
         const char *pCmdData, void *pContext)
 {
 	int32_t s32LogHandle = (int32_t)pContext;
 
-    if ((u32CmdNum == 0x00006001) || (u32CmdNum == 0x00006002))
+    if ((u32CmdNum == 0x00006001) || (u32CmdNum == 0x00006002) || (u32CmdNum == 0))
 	{
     	LogFileCtrlWriteLog(s32LogHandle, pCmdData, u32CmdSize * u32CmdCnt);
 	}
     else
 	{
 		PRINT("error command: 0x%08x\n", u32CmdNum);
+		return -1;
 	}
     return 0;
 }
-
+#endif
 void *ThreadLogServer(void *pArg)
 {
 	int32_t s32LogHandle, s32Err = 0;
@@ -52,41 +53,45 @@ void *ThreadLogServer(void *pArg)
 
 	while (!g_boIsExit)
 	{
-        fd_set stSet;
-        struct timeval stTimeout;
+		fd_set stSet;
+		struct timeval stTimeout;
 
-        int32_t s32Client = -1;
-        stTimeout.tv_sec = 2;
-        stTimeout.tv_usec = 0;
-        FD_ZERO(&stSet);
-        FD_SET(s32LogSocket, &stSet);
+		int32_t s32Client = -1;
+		stTimeout.tv_sec = 2;
+		stTimeout.tv_usec = 0;
+		FD_ZERO(&stSet);
+		FD_SET(s32LogSocket, &stSet);
 
-        if (select(s32LogSocket + 1, &stSet, NULL, NULL, &stTimeout) <= 0)
-        {
-            continue;
-        }
-        if (!FD_ISSET(s32LogSocket, &stSet))
-        {
-        	continue;
-        }
-        s32Client = ServerAccept(s32LogSocket);
-        if (s32Client < 0)
-        {
-        	PRINT("ServerAccept error: 0x%08x\n", s32Client);
-        	break;
-        }
-        else
-        {
-            uint32_t u32Size = 0;
-            void *pMCSStream;
-            pMCSStream = MCSSyncReceive(s32Client, 1000, &u32Size, NULL);
-            if (pMCSStream != NULL)
-            {
-                MCSResolve((const char *)pMCSStream, u32Size, MCSCallBack, (void *)s32LogHandle);
-                MCSSyncFree(pMCSStream);
-            }
-            close(s32Client);
-        }
+		if (select(s32LogSocket + 1, &stSet, NULL, NULL, &stTimeout) <= 0)
+		{
+			continue;
+		}
+		if (!FD_ISSET(s32LogSocket, &stSet))
+		{
+			continue;
+		}
+		s32Client = ServerAccept(s32LogSocket);
+		if (s32Client < 0)
+		{
+			PRINT("ServerAccept error: 0x%08x\n", s32Client);
+			break;
+		}
+		else
+		{
+			uint32_t u32Size = 0;
+			void *pMCSStream;
+			pMCSStream = MCSSyncReceive(s32Client, false, 1000, &u32Size, NULL);
+			if (pMCSStream != NULL)
+			{
+				LogFileCtrlWriteLog(s32LogHandle, pMCSStream, u32Size);
+
+#if 0
+				MCSResolve((const char *)pMCSStream, u32Size, MCSCallBack, (void *)s32LogHandle);
+				MCSSyncFree(pMCSStream);
+#endif
+			}
+			close(s32Client);
+		}
 	}
 	ServerRemove(s32LogSocket, LOG_SOCKET);
 	LogFileCtrlDestroy(s32LogHandle);

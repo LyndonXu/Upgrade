@@ -341,3 +341,22 @@ int32_t GetIPV4Addr(StIPV4Addr *pAddrOut, uint32_t *pCnt)
 	return 0;
 }
 
+/*
+ * 函数名      : TimeGetTime
+ * 功能        : 得到当前系统时间 (MS级)
+ * 参数        : 无
+ * 返回值      : 当前系统时间ms
+ * 作者        : 许龙杰
+ */
+uint64_t TimeGetTime(void)
+{
+    struct timeval stTime;
+
+    gettimeofday(&stTime, NULL);
+
+    uint64_t u64Time;
+    u64Time = stTime.tv_sec;
+    u64Time *= 1000; /* ms */
+    u64Time += (stTime.tv_usec / 1000);
+    return u64Time;
+}
