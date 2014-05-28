@@ -93,7 +93,7 @@ SRC += $(wildcard src/*.$(FILETYPE))
 OBJ = $(SRC:%.$(FILETYPE)=%.o)
 
 #test source
-TEST_SRC = $(wildcard test/*.$(FILETYPE))
+TEST_SRC = $(wildcard src_test/*.$(FILETYPE))
 TEST_OBJ = $(TEST_SRC:%.$(FILETYPE)=%.o)
 
 

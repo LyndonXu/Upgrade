@@ -186,7 +186,7 @@ bool AlreadyRunningUsingLockFile(const char *pLockFile)
     {
     	return false;
     }
-    s32Fd = open(pLockFile, O_RDWR | O_CREAT, LOCKMODE);
+    s32Fd = open(pLockFile, O_RDWR | O_CREAT, LOCK_MODE);
     if (s32Fd < 0)
     {
         syslog(LOG_ERR, "can't open %s: %s", pLockFile, strerror(errno));

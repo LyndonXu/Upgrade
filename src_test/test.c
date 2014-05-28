@@ -13,9 +13,58 @@
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+
 #include "upgrade.h"
 
 #if 1
+#define		FILE_MODE	(S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+#define		TEST_CNT	500
+int main(void)
+{
+	DBHANDLE	db;
+	int i;
+	char c8Buf[TEST_CNT][32], c8Data[64];
+	srand((int)time(NULL));
+	if ((db = db_open("/tmp/db", O_RDWR | O_CREAT | O_TRUNC, FILE_MODE)) == NULL)
+	{
+		printf("db_open error\n");
+		exit(1);
+	}
+
+	for (i = 0; i < TEST_CNT; i++)
+	{
+		int s32Cnt = (rand() % 20) + 5, j;
+		sprintf(c8Buf[i], "SN%05d%05d", rand() % 100000, rand() % 100000);
+		for(j = 0; j < s32Cnt; j++)
+		{
+			c8Data[j] = (rand() % 10) + '0';
+		}
+		c8Data[j] = 0;
+		if (db_store(db, c8Buf[i], c8Data, DB_STORE) != 0)
+		{
+			printf("db_store error for %s, %s\n", c8Buf[i], c8Data);
+			exit(1);
+		}
+	}
+	for (i = 0; i < TEST_CNT; i++)
+	{
+		if (db_fetch(db, c8Buf[i]) == NULL)
+		{
+			printf("db_fetch error for %d----%s\n", i, c8Buf[i]);
+			exit(1);
+		}
+	}
+	printf("%s\n", c8Buf[0]);
+
+	db_close(db);
+	exit(0);
+}
+#endif
+
+#if 0
 #define TEST_CNT	4096
 #if 1 /* mmap memory file */
 #include <sys/mman.h>

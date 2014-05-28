@@ -806,6 +806,32 @@ int32_t GetIPV4Addr(StIPV4Addr *pAddrOut, uint32_t *pCnt);
  */
 uint64_t TimeGetTime(void);
 
+
+typedef void *DBHANDLE;
+
+DBHANDLE db_open(const char *pathname, int32_t oflag, ...);
+void db_close(DBHANDLE h);
+char *db_fetch(DBHANDLE h, const char *key);
+int32_t db_store(DBHANDLE h, const char *key, const char *data, int32_t flag);
+int32_t db_delete(DBHANDLE h, const char *key);
+void db_rewind(DBHANDLE h);
+char *db_nextrec(DBHANDLE h, char *key);
+
+/*
+ * Flags for db_store().
+ */
+#define DB_INSERT	   1	/* insert new record only */
+#define DB_REPLACE	   2	/* replace existing record */
+#define DB_STORE	   3	/* replace or insert */
+
+/*
+ * Implementation limits.
+ */
+#define IDXLEN_MIN	   6	/* key, sep, start, sep, length, \n */
+#define IDXLEN_MAX	1024	/* arbitrary */
+#define DATLEN_MIN	   2	/* data byte, newline */
+#define DATLEN_MAX	1024	/* arbitrary */
+
 #ifdef __cplusplus
 }
 #endif

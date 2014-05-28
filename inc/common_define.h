@@ -86,8 +86,8 @@
 #define SEM_FILE	"sem.sem"
 #define SHM_FILE	"shm.shm"
 
-#define MODE_RW (S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
-#define LOCKMODE (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
+#define MODE_RW		(S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP | S_IROTH | S_IWOTH)
+#define LOCK_MODE	(S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 
 #define SEM_MODE	0600
 #define KEY_MODE	0600/* (S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH) */
@@ -383,6 +383,35 @@ typedef struct _tagStCloudHandle		/* 与StSLOHandle类似 */
 	StCloud *pCloud;
 }StCloudHandle;
 
+
+
+int		lock_reg(int, int, int, off_t, int, off_t); /* {Prog lockreg} */
+
+#define	read_lock(fd, offset, whence, len) \
+			lock_reg((fd), F_SETLK, F_RDLCK, (offset), (whence), (len))
+#define	readw_lock(fd, offset, whence, len) \
+			lock_reg((fd), F_SETLKW, F_RDLCK, (offset), (whence), (len))
+#define	write_lock(fd, offset, whence, len) \
+			lock_reg((fd), F_SETLK, F_WRLCK, (offset), (whence), (len))
+#define	writew_lock(fd, offset, whence, len) \
+			lock_reg((fd), F_SETLKW, F_WRLCK, (offset), (whence), (len))
+#define	un_lock(fd, offset, whence, len) \
+			lock_reg((fd), F_SETLK, F_UNLCK, (offset), (whence), (len))
+
+pid_t	lock_test(int, int, off_t, int, off_t);		/* {Prog locktest} */
+
+#define	is_read_lockable(fd, offset, whence, len) \
+			(lock_test((fd), F_RDLCK, (offset), (whence), (len)) == 0)
+#define	is_write_lockable(fd, offset, whence, len) \
+			(lock_test((fd), F_WRLCK, (offset), (whence), (len)) == 0)
+
+void	err_msg(const char *, ...);			/* {App misc_source} */
+void	err_dump(const char *, ...) __attribute__((noreturn));
+void	err_quit(const char *, ...) __attribute__((noreturn));
+void	err_cont(int, const char *, ...);
+void	err_exit(int, const char *, ...) __attribute__((noreturn));
+void	err_ret(const char *, ...);
+void	err_sys(const char *, ...) __attribute__((noreturn));
 
 enum
 {

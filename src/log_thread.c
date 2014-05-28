@@ -87,8 +87,8 @@ void *ThreadLogServer(void *pArg)
 
 #if 0
 				MCSResolve((const char *)pMCSStream, u32Size, MCSCallBack, (void *)s32LogHandle);
-				MCSSyncFree(pMCSStream);
 #endif
+				MCSSyncFree(pMCSStream);
 			}
 			close(s32Client);
 		}
