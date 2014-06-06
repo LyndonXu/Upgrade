@@ -58,6 +58,7 @@ typedef struct
 	COUNT cnt_stor3; /* store: DB_REPLACE, diff len, appended */
 	COUNT cnt_stor4; /* store: DB_REPLACE, same len, overwrote */
 	COUNT cnt_storerr; /* store error */
+	pthread_mutex_t stMutex; /* for thread safe */
 } DB;
 
 /*
@@ -196,6 +197,13 @@ static DB *_db_alloc(int32_t namelen)
 		err_dump("_db_alloc: malloc error for index buffer");
 	if ((db->datbuf = malloc(DATLEN_MAX + 2)) == NULL)
 		err_dump("_db_alloc: malloc error for data buffer");
+	{
+		int32_t s32Err = pthread_mutex_init(&(db->stMutex), NULL);
+		if (s32Err != 0)
+		{
+			err_dump("_db_alloc: pthread_mutex_init");
+		}
+	}
 	return (db);
 }
 
@@ -223,6 +231,7 @@ static void _db_free(DB *db)
 		free(db->datbuf);
 	if (db->name != NULL)
 		free(db->name);
+	pthread_mutex_destroy(&(db->stMutex));
 	free(db);
 }
 
@@ -234,6 +243,15 @@ char *db_fetch(DBHANDLE h, const char *key)
 	DB *db = h;
 	char *ptr;
 
+	if ((h == NULL) || (key == NULL))
+	{
+		return NULL;
+	}
+
+	if (pthread_mutex_lock(&(db->stMutex)) != 0)
+	{
+		return NULL;
+	}
 	if (_db_find_and_lock(db, key, 0) < 0)
 	{
 		ptr = NULL; /* error, record not found */
@@ -250,6 +268,7 @@ char *db_fetch(DBHANDLE h, const char *key)
 	 */
 	if (un_lock(db->idxfd, db->chainoff, SEEK_SET, 1) < 0)
 		err_dump("db_fetch: un_lock error");
+	pthread_mutex_unlock(&(db->stMutex));
 	return (ptr);
 }
 
@@ -442,6 +461,14 @@ int32_t db_delete(DBHANDLE h, const char *key)
 	DB *db = h;
 	int32_t rc = 0; /* assume record will be found */
 
+	if ((h == NULL) || (key == NULL))
+	{
+		return -1;
+	}
+	if (pthread_mutex_lock(&(db->stMutex)) != 0)
+	{
+		return -1;
+	}
 	if (_db_find_and_lock(db, key, 1) == 0)
 	{
 		_db_dodelete(db);
@@ -454,6 +481,7 @@ int32_t db_delete(DBHANDLE h, const char *key)
 	}
 	if (un_lock(db->idxfd, db->chainoff, SEEK_SET, 1) < 0)
 		err_dump("db_delete: un_lock error");
+	pthread_mutex_unlock(&(db->stMutex));
 	return (rc);
 }
 
@@ -637,7 +665,10 @@ int32_t db_store(DBHANDLE h, const char *key, const char *data, int32_t flag)
 	DB *db = h;
 	int32_t rc, keylen, datlen;
 	off_t ptrval;
-
+	if ((h == NULL) || (key == NULL) || (data == NULL))
+	{
+		return -1;
+	}
 	if (flag != DB_INSERT && flag != DB_REPLACE && flag != DB_STORE)
 	{
 		errno = EINVAL;
@@ -647,6 +678,11 @@ int32_t db_store(DBHANDLE h, const char *key, const char *data, int32_t flag)
 	datlen = strlen(data) + 1; /* +1 for newline at end */
 	if (datlen < DATLEN_MIN || datlen > DATLEN_MAX)
 		err_dump("db_store: invalid data length");
+
+	if (pthread_mutex_lock(&(db->stMutex)) != 0)
+	{
+		return -1;
+	}
 
 	/*
 	 * _db_find_and_lock calculates which hash table this new record
@@ -747,9 +783,10 @@ int32_t db_store(DBHANDLE h, const char *key, const char *data, int32_t flag)
 	}
 	rc = 0; /* OK */
 
-	doreturn: /* unlock hash chain locked by _db_find_and_lock */
+doreturn: /* unlock hash chain locked by _db_find_and_lock */
 	if (un_lock(db->idxfd, db->chainoff, SEEK_SET, 1) < 0)
 		err_dump("db_store: un_lock error");
+	pthread_mutex_unlock(&(db->stMutex));
 	return (rc);
 }
 
@@ -825,6 +862,15 @@ void db_rewind(DBHANDLE h)
 	DB *db = h;
 	off_t offset;
 
+	if ((h == NULL))
+	{
+		return;
+	}
+	if (pthread_mutex_lock(&(db->stMutex)) != 0)
+	{
+		return;
+	}
+
 	offset = (db->nhash + 1) * PTR_SZ; /* +1 for free list ptr */
 
 	/*
@@ -834,6 +880,7 @@ void db_rewind(DBHANDLE h)
 	 */
 	if ((db->idxoff = lseek(db->idxfd, offset + 1, SEEK_SET)) == -1)
 		err_dump("db_rewind: lseek error");
+	pthread_mutex_unlock(&(db->stMutex));
 }
 
 /*
@@ -847,6 +894,15 @@ char *db_nextrec(DBHANDLE h, char *key)
 	DB *db = h;
 	char c;
 	char *ptr;
+
+	if ((h == NULL) || (key == NULL))
+	{
+		return NULL;
+	}
+	if (pthread_mutex_lock(&(db->stMutex)) != 0)
+	{
+		return NULL;
+	}
 
 	/*
 	 * We read lock the free list so that we don't read
@@ -880,5 +936,6 @@ char *db_nextrec(DBHANDLE h, char *key)
 
 	doreturn: if (un_lock(db->idxfd, FREE_OFF, SEEK_SET, 1) < 0)
 		err_dump("db_nextrec: un_lock error");
+	pthread_mutex_unlock(&(db->stMutex));
 	return (ptr);
 }

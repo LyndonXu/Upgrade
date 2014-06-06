@@ -274,7 +274,7 @@ int32_t GetIPV4Addr(StIPV4Addr *pAddrOut, uint32_t *pCnt)
 			continue;
 		}
 		}
-		strncpy(pAddrOut[u32NetworkCnt].c8Name, c8NewWork[i], 16);
+		strncpy(pAddrOut[u32NetworkCnt].c8Name, c8NewWork[i], IPV4_ADDR_LENGTH);
 		PRINT("network :%s address: %s\n", c8NewWork[i], pAddrOut[u32NetworkCnt].c8IPAddr);
 		u32NetworkCnt++;
 		if (u32NetworkCnt >= (*pCnt))
@@ -326,7 +326,7 @@ int32_t GetIPV4Addr(StIPV4Addr *pAddrOut, uint32_t *pCnt)
 			}
 			PRINT("network :%s address: %s\n", pI->ifa_name, c8Host);
 			strncpy(pAddrOut[u32NetworkCnt].c8Name, pI->ifa_name, 16);
-			strncpy(pAddrOut[u32NetworkCnt].c8IPAddr, c8Host, 16);
+			strncpy(pAddrOut[u32NetworkCnt].c8IPAddr, c8Host, IPV4_ADDR_LENGTH);
 			u32NetworkCnt++;
 			if (u32NetworkCnt >= (*pCnt))
 			{
@@ -339,6 +339,54 @@ int32_t GetIPV4Addr(StIPV4Addr *pAddrOut, uint32_t *pCnt)
 	freeifaddrs(pInterfaceAddr);
 #endif
 	return 0;
+}
+
+/*
+ * 函数名      : GetHostIPV4Addr
+ * 功能        : 解析域名或者IPV4的IPV4地址
+ * 参数        : pHost [in] (const char * 类型): 详见定义
+ *             : c8IPV4Addr [in/out] (char [IPV4_ADDR_LENGTH] 类型): 用于保存IP地址
+ *             : pInternetAddr [in/out] (struct in_addr * 类型): 用户保存Internet类型地址
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t GetHostIPV4Addr(const char *pHost, char c8IPV4Addr[IPV4_ADDR_LENGTH], struct in_addr *pInternetAddr)
+{
+	if (pHost == NULL)
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	else
+	{
+		struct addrinfo stFilter = {0};
+		struct addrinfo *pRslt = NULL;
+		int32_t s32Err = 0;
+		stFilter.ai_family = AF_INET;
+		stFilter.ai_socktype = SOCK_STREAM;
+		s32Err = getaddrinfo(pHost, NULL, &stFilter, &pRslt);
+		if (s32Err == 0)
+		{
+			struct sockaddr_in *pTmp =  (struct sockaddr_in *)(pRslt->ai_addr);
+			if (pInternetAddr != NULL)
+			{
+				*pInternetAddr = pTmp->sin_addr;
+			}
+			if (c8IPV4Addr != NULL)
+			{
+				inet_ntop(AF_INET, (void *)(&(pTmp->sin_addr)), c8IPV4Addr, IPV4_ADDR_LENGTH);
+				PRINT("after inet_ntoa: %s\n", c8IPV4Addr);		/* just get the first address */
+			}
+			return 0;
+		}
+		else
+		{
+			PRINT("getaddrinfo s32Err = %d, error: %s\n", s32Err, gai_strerror(s32Err));
+			s32Err = 0 - s32Err;
+			return MY_ERR(_Err_Unkown_Host + s32Err);
+		}
+	}
+
+
 }
 
 /*

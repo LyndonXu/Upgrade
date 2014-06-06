@@ -128,7 +128,7 @@ StFileCtrl *FileCtrlInit(const char *pName, uint32_t u32MaxCnt, int32_t *pErr)
 			/* open file */
 			c8Buf[0] = 0;
 			sprintf(c8Buf, "%s%d", c8Name, i);
-#if defined _DEBUG
+#ifdef _DEBUG
 			pFileCtrlElement[i].c8Name[0] = 0;
 			strcat(pFileCtrlElement[i].c8Name, c8Buf);
 #endif

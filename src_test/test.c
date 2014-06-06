@@ -20,6 +20,34 @@
 #include "upgrade.h"
 
 #if 1
+int main()
+{
+	return 0;
+}
+
+#endif
+
+#if 0
+int main()
+{
+	char c8IPV4[IPV4_ADDR_LENGTH];
+	GetHostIPV4Addr("www.baidu.com", NULL, NULL);
+	return 0;
+}
+
+#endif
+
+#if 0
+int main()
+{
+	void JSONTest();
+	JSONTest();
+	return 0;
+}
+
+#endif
+
+#if 0
 #define		FILE_MODE	(S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 #define		TEST_CNT	500
 int main(void)
@@ -27,6 +55,7 @@ int main(void)
 	DBHANDLE	db;
 	int i;
 	char c8Buf[TEST_CNT][32], c8Data[64];
+	uint64_t u64Time;
 	srand((int)time(NULL));
 	if ((db = db_open("/tmp/db", O_RDWR | O_CREAT | O_TRUNC, FILE_MODE)) == NULL)
 	{
@@ -43,12 +72,13 @@ int main(void)
 			c8Data[j] = (rand() % 10) + '0';
 		}
 		c8Data[j] = 0;
-		if (db_store(db, c8Buf[i], c8Data, DB_STORE) != 0)
+		if (db_store(db, c8Buf[i], c8Data, DB_STORE) == -1)
 		{
 			printf("db_store error for %s, %s\n", c8Buf[i], c8Data);
 			exit(1);
 		}
 	}
+	u64Time = TimeGetTime();
 	for (i = 0; i < TEST_CNT; i++)
 	{
 		if (db_fetch(db, c8Buf[i]) == NULL)
@@ -57,7 +87,8 @@ int main(void)
 			exit(1);
 		}
 	}
-	printf("%s\n", c8Buf[0]);
+	u64Time = TimeGetTime() - u64Time;
+	printf("find %d entry using time: %lldms\n", TEST_CNT, u64Time);
 
 	db_close(db);
 	exit(0);
@@ -244,7 +275,7 @@ int main(int argc, char *argv[])
 #if 0
 int main()
 {
-	StCloudStat stStat = {false};
+	StCloudDomain stStat = {{_Cloud_IsOnline}};
 	const char c8ID[PRODUCT_ID_CNT] = {"01234567/9012345"};
 	const char c8Key[XXTEA_KEY_CNT_CHAR] = {"0123456789012345"};
 	CloudAuthentication(&stStat, c8ID, c8Key);
@@ -298,8 +329,8 @@ int main()
 //ebank.spdb.com.cn/per/gb/otplogin.jsp
 int main()
 {
-	StCloudStat stStat = { _Cloud_IsOnline, "10.0.0.110", "ebank.spdb.com.cn" };
-	StSendInfo  stInfo = { false, "per/gb/otplogin.jsp"};
+	StCloudDomain stStat = { {_Cloud_IsOnline, "10.0.0.110"}, "spdb.com.cn", 443};
+	StSendInfo  stInfo = { false, "ebank", "per/gb/otplogin.jsp"};
 	StMMap stMMap = {NULL,};
 	int32_t s32Err;
 #if 0
@@ -335,7 +366,7 @@ int main()
 			continue;
 		}
 		printf("network: %s, IP address: %s begin to try\n", stAddr[i].c8Name, stAddr[i].c8IPAddr);
-		strncpy(stStat.c8ClientIPV4, stAddr[i].c8IPAddr, 16);
+		strncpy(stStat.stStat.c8ClientIPV4, stAddr[i].c8IPAddr, 16);
 		s32Err = CloudSendAndGetReturn(&stStat, &stInfo, &stMMap);
 		if (s32Err == 0)
 		{

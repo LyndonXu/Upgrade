@@ -45,6 +45,10 @@ void CloudTombDestroy(int32_t s32Handle)
 	}
 	ReleaseAShmId(pHandle->s32SHMHandle);
 	LockClose(pHandle->s32LockHandle);
+	if (pHandle->pDBHandle != NULL)
+	{
+		db_close(pHandle->pDBHandle);
+	}
 	free(pHandle);
 }
 
@@ -104,7 +108,7 @@ int32_t CloudInit(int32_t *pErr)
 							offsetof(StMemCheck, s32CheckSum) / sizeof(int32_t))))
 	{
 		PRINT("the shared memory has been initialized\n");
-		goto ok;
+		goto shm_ok;
 	}
 
 	PRINT("I will initialize the shared memory\n");
@@ -122,8 +126,9 @@ int32_t CloudInit(int32_t *pErr)
 	pHandle->pCloud->stMemCheck.s32CheckSum =
 		CheckSum((int32_t *)pHandle->pCloud, offsetof(StMemCheck, s32CheckSum) / sizeof(int32_t));
 
-ok:
+shm_ok:
 	LockUnlock(pHandle->s32LockHandle);
+	pHandle->pDBHandle = db_open(DB_NAME,  O_RDWR | O_CREAT | O_TRUNC, MODE_RW);
 	return (int32_t)pHandle;
 err1:
 	CloudTombDestroy((int32_t)pHandle);
@@ -160,11 +165,35 @@ int32_t CloudGetStat(int32_t s32Handle, StCloudStat *pStat)
 }
 
 /*
+ * 函数名      : CloudGetStat
+ * 功能        : 通过句柄得到云状态
+ * 参数        : s32Handle [in] (int32_t): CloudInit返回的句柄
+ * 返回值      : bool 标识云是否在线
+ * 作者        : 许龙杰
+ */
+bool CloudIsOnline(int32_t s32Handle)
+{
+	StCloudHandle *pHandle = (StCloudHandle *)s32Handle;
+
+	if (pHandle == NULL)
+	{
+		return false;
+	}
+
+	if (pHandle->pCloud->stStat.emStat == _Cloud_IsOnline)
+	{
+		return true;
+	}
+
+	return false;
+}
+
+/*
  * 函数名      : CloudSetStat
  * 功能        : 通过句柄设置云状态
  * 参数        : s32Handle [in] (int32_t): CloudInit返回的句柄
  * 			   : pStat[out] (StCloudStat *): 保存云状态，详见定义
- * 返回值      : int32_t 型数据, 0失败, 否则成功
+ * 返回值      : int32_t 型数据, 0成功, 否则表示错误码
  * 作者        : 许龙杰
  */
 int32_t CloudSetStat(int s32Handle, StCloudStat *pStat)
@@ -182,6 +211,87 @@ int32_t CloudSetStat(int s32Handle, StCloudStat *pStat)
 		LockUnlock(pHandle->s32LockHandle);
 	}
 	return s32Err;
+}
+
+const char *c_pRegionPrefix[_Region_Reserved] =
+{
+	"Region_HTTPS",
+	"Region_UDP",
+};
+
+/*
+ * 函数名      : CloudSaveDomainViaRegion
+ * 功能        : 保存区域对应的域名[:端口]
+ * 参数        : s32Handle [in] (int32_t): CloudInit返回的句柄
+ * 			   : emType[in] (EmRegionType): 要查找域名的类别
+ * 			   : pRegion[in] (const char *): 域名的关键值, 区域编号, 例如: "CN"、"EN"、"US"......,
+ * 			     必须是以\0为结尾的字符串
+ * 			   : pDomain[in] (const char *): 域名的内容[:端口], 例如:"wehealth.com[:443]"("[]"代表可有可无，
+ * 			     没有的话为默认443), 必须是以\0为结尾的字符串
+ * 返回值      : int32_t 型数据, 0成功, 否则表示错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudSaveDomainViaRegion(int s32Handle,  EmRegionType emType,
+		const char *pRegion, const char *pDomain)
+{
+
+	StCloudHandle *pHandle = (StCloudHandle *)s32Handle;
+	if ((pHandle == NULL) || (emType >= _Region_Reserved) ||
+			(pRegion == NULL) || (pDomain == NULL))
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	{
+	char c8Key[64];
+	snprintf(c8Key, 64, "%s_%s", c_pRegionPrefix[emType], pRegion);
+	if (db_store(pHandle->pDBHandle, c8Key, pDomain, DB_STORE) == -1)
+	{
+		return MY_ERR(_Err_Cloud_Save_Domain);
+	}
+	}
+
+	return 0;
+}
+
+/*
+ * 函数名      : CloudGetDomainFromRegion
+ * 功能        : 得到区域对应的域名[:端口]
+ * 参数        : s32Handle [in] (int32_t): CloudInit返回的句柄
+ * 			   : emType[in] (EmRegionType): 要查找域名的类别
+ * 			   : pRegion[in] (const char *): 域名的关键值, 区域编号, 例如: "CN"、"EN"、"US"......,
+ * 			     必须是以\0为结尾的字符串
+ * 			   : pDomain[out] (char *): 成功保存域名的内容[:端口], 例如:"wehealth.com[:443]"("[]"代表可有可无，
+ * 			     没有的话为默认443), 必须是以\0为结尾的字符串
+ * 			     u32Size[out] (uint32_t): 指明pDomain指向字符串的大小
+ * 返回值      : int32_t 型数据, 0成功, 否则表示错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudGetDomainFromRegion(int32_t s32Handle, EmRegionType emType,
+		const char *pRegion, char *pDomain, uint32_t u32Size)
+{
+
+	StCloudHandle *pHandle = (StCloudHandle *)s32Handle;
+	if ((pHandle == NULL) || (emType >= _Region_Reserved) ||
+			(pRegion == NULL) || (pDomain == NULL))
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	{
+	char *pBuf;
+	char c8Key[64];
+	snprintf(c8Key, 64, "%s_%s", c_pRegionPrefix[emType], pRegion);
+	pBuf = db_fetch(pHandle->pDBHandle, c8Key);
+	if (pBuf == NULL)
+	{
+		PRINT("cannot find domain form database via key: %s\n", pRegion);
+		return MY_ERR(_Err_Cloud_Get_Domain);
+	}
+	else
+	{
+		strncpy(pDomain, pBuf, u32Size);
+	}
+	}
+	return 0;
 }
 
 /*
@@ -238,20 +348,20 @@ void SSL_Destory(void)
 /*
  * 函数名      : CloudSendAndGetReturn
  * 功能        : 向云发送数据并得到返回，保存在pMap中
- * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ * 参数        : pStat [in] (StCloudDomain * 类型): 云状态，详见定义
  *             : pSendInfo [in] (StSendInfo 类型): 发送信息，详见定义
  *             : pMap [out] (StMMap *): 保存返回内容，详见定义，使用过之后必须使用CloudMapRelease销毁
  * 返回        : 正确返回0, 错误返回错误码
  * 作者        : 许龙杰
  */
-int32_t CloudSendAndGetReturn(StCloudStat *pStat, StSendInfo *pSendInfo, StMMap *pMap)
+int32_t CloudSendAndGetReturn(StCloudDomain *pStat, StSendInfo *pSendInfo, StMMap *pMap)
 {
 	if ((pStat == NULL) || (pSendInfo == NULL) || (pMap == NULL))
 	{
 		return MY_ERR(_Err_InvalidParam);
 	}
 
-	if (pStat->emStat != _Cloud_IsOnline)
+	if (pStat->stStat.emStat != _Cloud_IsOnline)
 	{
 		return MY_ERR(_Err_Cloud_IsNotOnline);
 	}
@@ -260,27 +370,32 @@ int32_t CloudSendAndGetReturn(StCloudStat *pStat, StSendInfo *pSendInfo, StMMap 
 	int32_t s32Err = 0;
 	int32_t s32Socket = -1;
 	struct sockaddr_in stServerAddr, stClientAddr;
-	struct hostent *pHost;
 
 	SSL *pSSL;
 	SSL_CTX *pSSLCTX;
 	int32_t s32SSL = -1;
-
-	if ((pHost = gethostbyname(pStat->c8ServerURL)) == NULL)
+	char c8Domain[64];
+	c8Domain[0] = 0;
+	if (pSendInfo->pSecondDomain != NULL)
 	{
-		/* get the IP address of the server */
-		PRINT("gethostbyname error, %s\n", strerror(errno));
-		return MY_ERR(_Err_SYS + errno);
+		sprintf(c8Domain, "%s.", pSendInfo->pSecondDomain);
 	}
+	strcat(c8Domain, pStat->c8Domain);
 
 	bzero(&stServerAddr, sizeof(stServerAddr));
 	stServerAddr.sin_family = AF_INET;
-	stServerAddr.sin_addr = *((struct in_addr *) pHost->h_addr);
-	stServerAddr.sin_port = htons(443);	/* https */
+	s32Err = GetHostIPV4Addr(c8Domain, NULL, &(stServerAddr.sin_addr));
+	if (s32Err != 0)
+	{
+		/* get the IP address of the server */
+		PRINT("GetHostIPV4Addr error\n");
+		return s32Err;
+	}
+	stServerAddr.sin_port = htons(pStat->s32Port);	/* https */
 
 	bzero(&stClientAddr, sizeof(stClientAddr));
 	stClientAddr.sin_family = AF_INET;    /* Internet protocol */
-	if (inet_aton(pStat->c8ClientIPV4, &stClientAddr.sin_addr) == 0)
+	if (inet_aton(pStat->stStat.c8ClientIPV4, &stClientAddr.sin_addr) == 0)
 	{
 		PRINT("client IP address error!\n");
 		return MY_ERR(_Err_SYS + errno);
@@ -423,7 +538,7 @@ int32_t CloudSendAndGetReturn(StCloudStat *pStat, StSendInfo *pSendInfo, StMMap 
 			"Content-Length: %d\r\n"
 			"Connection: Close\r\n\r\n",
 			pSendInfo->boIsGet ? "GET" : "POST",
-			pSendInfo->pFile, pStat->c8ServerURL, 443,
+			pSendInfo->pFile, c8Domain, pStat->s32Port,
 			pSendInfo->s32BodySize);
 	PRINT("%s", c8Request);
 	/* send */
@@ -599,6 +714,96 @@ void CloudMapRelease(StMMap *pMap)
 	}
 }
 
+
+/*
+ * 函数名      : GetRegionOfGateway
+ * 功能        : 得到Gateway的区域信息
+ * 参数        : pRegion [out] (char * 类型): 成功保存区域字符串
+ *             : uint32_t [in] (uint32_t 类型): pRegion指向字符串的长度
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t GetRegionOfGateway(char *pRegion, uint32_t u32Size)
+{
+	if ((pRegion == NULL) || (u32Size == 0))
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	else
+	{
+		json_object *pInfo, *pRegionObj;
+		pInfo = json_object_from_file(GATEWAY_INFO_FILE);
+		if (pInfo == NULL)
+		{
+			PRINT("json_object_from_file error\n");
+			return MY_ERR(_Err_JSON);
+		}
+		pRegionObj = json_object_object_get(pInfo, "Ptr");
+		if (pRegionObj == NULL)
+		{
+			json_object_put(pInfo);
+			return MY_ERR(_Err_JSON);
+		}
+
+		pRegionObj = json_object_object_get(pRegionObj, "Region");
+		if (pRegionObj == NULL)
+		{
+			json_object_put(pInfo);
+			return MY_ERR(_Err_JSON);
+		}
+		strncpy(pRegion, json_object_get_string(pRegionObj), u32Size);
+		json_object_put(pInfo);
+		return 0;
+	}
+}
+
+/*
+ * 函数名      : GetDomainPortFromString
+ * 功能        : 得到Gateway的区域信息
+ * 参数        : pStr [in] (const char * 类型): 要解析的符串(以'\0'结尾), 例如"www.jiuan.com[:443]"
+ * 			   : pDomain [out] (char * 类型): 成功保存域名
+ *             : uint32_t [in] (uint32_t 类型): pDomain指向字符串的长度
+ *             : pPort [out] (uint32_t * 类型): 成功保存段口号
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t GetDomainPortFromString(const char *pStr, char *pDomain, uint32_t u32Size, int32_t *pPort)
+{
+	if (pStr == NULL || pDomain == NULL || pPort == NULL || u32Size == 0)
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	else
+	{
+		uint32_t i = 0;
+		bool boFindPort = false;
+		while (pStr[i] != 0)
+		{
+			if (pStr[i] == ':')
+			{
+				*pPort = atoi(pStr + i + 1);
+				pDomain[i] = 0;
+				boFindPort = true;
+				break;
+			}
+
+			if (i < u32Size)
+			{
+				pDomain[i] = pStr[i];
+			}
+			i++;
+		}
+		pDomain[u32Size - 1] = 0;
+		if (!boFindPort)
+		{
+			*pPort = 443;
+		}
+	}
+
+	return 0;
+}
+
+
 /* get http return code HTTP/1.1 200 OK ect. */
 int32_t GetHttpReturnCode(StMMap *pMap)
 {
@@ -639,7 +844,7 @@ const char *GetHttpBody(StMMap *pMap)
 /* get the json of the return */
 json_object *GetHttpJsonBody(StMMap *pMap, int32_t *pErr)
 {
-	json_object *pReturn = NULL;
+	json_object *pReturn = NULL, *pSon;
 	int32_t s32Err;
 	const char *pBody;
 	/* analysis the return text */
@@ -661,117 +866,178 @@ json_object *GetHttpJsonBody(StMMap *pMap, int32_t *pErr)
 		s32Err = MY_ERR(_Err_Cloud_JSON);
 		goto end;
 	}
+	pSon = json_object_object_get(pReturn, "Result");
+	if (pSon == NULL)
+	{
+		s32Err = MY_ERR(_Err_Cloud_JSON);
+		json_object_put(pReturn);
+		pReturn = NULL;
+		goto end;
+	}
+	/* result is ok */
+	if (json_object_is_type(pSon, json_type_int))
+	{
+		s32Err = json_object_get_int(pSon);
+		if (s32Err != 1)
+		{
+			pSon = json_object_object_get(pSon, "ResultMessage");
+			PRINT("ResultMessage: %s\n", json_object_to_json_string(pSon));
+			s32Err = MY_ERR(_Err_Cloud_Result + s32Err);
+			json_object_put(pReturn);
+			pReturn = NULL;
+			goto end;
+		}
+	}
+	else
+	{
+		s32Err = MY_ERR(_Err_Cloud_JSON);
+		json_object_put(pReturn);
+		pReturn = NULL;
+		goto end;
+	}
+	pSon = json_object_object_get(pReturn, "ReturnValue");
+	if (pSon == NULL)
+	{
+		s32Err = MY_ERR(_Err_Cloud_JSON);
+		json_object_put(pReturn);
+		pReturn = NULL;
+		goto end;
+	}
+	else
+	{
+		s32Err = 0;
+		json_object_get(pSon);
+		json_object_put(pReturn);
+		return pSon;
+	}
+
 end:
 	*pErr = s32Err;
 	return pReturn;
+}
+/*
+ * resolve the command of 0xF5 from the cloud
+ * 1:
+ */
+int32_t ResolveCmd_0xF5(json_object *pJsonObj)
+{
+	char c8Buf[16];
+	int s32Rslt = 0xFD;
+	char c8Tmp = 0;
+	sprintf(c8Buf, "%s", json_object_get_string(pJsonObj));
+	sscanf(c8Buf, "%02hhX", &c8Tmp);
+	s32Rslt = c8Tmp;
+	return (s32Rslt & 0xFF);
 }
 
 /* resolve the command of 0xFA from the cloud, the c8R will save the cloud R */
 int32_t ResolveCmd_0xFA(json_object *pJsonObj, char c8R[RAND_NUM_CNT])
 {
-	{
-	json_object *pCmd = NULL;
-	if (!json_object_object_get_ex(pJsonObj, "Command", &pCmd))
-	{
-		return MY_ERR(_Err_Cloud_CMD);
-	}
-	if (strcmp("0xFA", json_object_to_json_string(pCmd)) != 0)
-	{
-		return  MY_ERR(_Err_Cloud_CMD);
-	}
-	}
 	/* command data */
 	{
+	int32_t s32Len;
+	s32Len = json_object_get_string_len(pJsonObj);
+	if (s32Len != (RAND_NUM_CNT * 2))
+	{
+		PRINT("command FA R NULL\n");
+		return MY_ERR(_Err_Cloud_Data);
+	}
+	}
 
-	json_object *pData = NULL;
-	json_object *pArray = NULL;
-	int32_t s32ArrayCnt, i;
-	if (!json_object_object_get_ex(pJsonObj, "Data", &pData))
 	{
-		return MY_ERR(_Err_Cloud_Data);
+	int32_t i;
+	const uint16_t *pBuf = (const uint16_t *)json_object_to_json_string(pJsonObj);
+	char c8Buf[4] = {0};
+	uint16_t *pTmp = (uint16_t *)c8Buf;
+	for (i = 0; i < RAND_NUM_CNT; i++)
+	{
+		*pTmp = pBuf[i];
+		sscanf(c8Buf, "%02hhX", c8R + i);
 	}
-	if (!json_object_object_get_ex(pJsonObj, "RandNum", &pArray))
-	{
-		return MY_ERR(_Err_Cloud_Data);
 	}
-	if (json_object_get_type(pArray) != json_type_array)
+	return 0;
+}
+
+/* resolve the command of 0xFB from the cloud, the c8ClientR is R1 of client */
+int32_t ResolveCmd_0xFB(json_object *pJsonObj, char c8ClientR[RAND_NUM_CNT], const char c8Key[XXTEA_KEY_CNT_CHAR])
+{
+	btea((int32_t *)c8ClientR, RAND_NUM_CNT / sizeof(int32_t), (int32_t *)c8Key);
+
+	/* command data */
 	{
-		return MY_ERR(_Err_Cloud_Data);
+	int32_t s32Len;
+	s32Len = json_object_get_string_len(pJsonObj);
+	if (s32Len != (RAND_NUM_CNT * 2))
+	{
+		PRINT("command FB RN1's coding NULL\n");
+		return MY_ERR(_Err_Cloud_Authentication);
 	}
-	s32ArrayCnt = json_object_array_length(pArray);
-	if (s32ArrayCnt != RAND_NUM_CNT)
-	{
-		return MY_ERR(_Err_Cloud_Data);
 	}
-	for (i = 0; i < s32ArrayCnt; i++)
+
 	{
-		json_object *pObj = json_object_array_get_idx(pArray, i);
-		const char *pRTmp = json_object_to_json_string(pObj);
-		sscanf(pRTmp, "0x%02hhx", c8R + i);
+	int32_t i;
+	const uint16_t *pBuf = (const uint16_t *)json_object_to_json_string(pJsonObj);
+	char c8Buf[4] = {0};
+	uint16_t *pTmp = (uint16_t *)c8Buf;
+	for (i = 0; i < RAND_NUM_CNT; i++)
+	{
+		char c8R = 0;
+		*pTmp = pBuf[i];
+		sscanf(c8Buf, "%02hhX", &c8R);
+		if (c8R != c8ClientR[i])
+		{
+			PRINT("command FB RN1's coding error\n");
+			return MY_ERR(_Err_Cloud_Authentication);
+		}
 	}
 	}
 
 	return 0;
 }
 
-/* resolve the command of 0xFB from the cloud, the c8ClientR is code R from client */
-int32_t ResolveCmd_0xFB(json_object *pJsonObj, char c8ClientR[RAND_NUM_CNT])
+
+json_object *BuildupCmdIDPS(int32_t *pErr)
 {
+	json_object * pJsonObj = json_object_new_object();
+	if (pJsonObj == NULL)
 	{
-	json_object *pCmd = NULL;
-	if (!json_object_object_get_ex(pJsonObj, "Command", &pCmd))
-	{
-		return MY_ERR(_Err_Cloud_CMD);
-	}
-	if (strcmp("0xFB", json_object_to_json_string(pCmd)) != 0)
-	{
-		if (strcmp("0xFD", json_object_to_json_string(pCmd)) != 0)
-		{
-			return  MY_ERR(_Err_Cloud_CMD);
-		}
-		else
-		{
-			return MY_ERR(_Err_Cloud_Authentication);
-		}
-	}
-	}
-	/* command data */
-	{
-
-	json_object *pData = NULL;
-	json_object *pArray = NULL;
-	int32_t s32ArrayCnt, i;
-	char c8R[RAND_NUM_CNT];
-	if (!json_object_object_get_ex(pJsonObj, "Data", &pData))
-	{
-		return MY_ERR(_Err_Cloud_Data);
-	}
-	if (!json_object_object_get_ex(pJsonObj, "CodingRandNum1", &pArray))
-	{
-		return MY_ERR(_Err_Cloud_Data);
-	}
-	if (json_object_get_type(pArray) != json_type_array)
-	{
-		return MY_ERR(_Err_Cloud_Data);
-	}
-	s32ArrayCnt = json_object_array_length(pArray);
-	if (s32ArrayCnt != RAND_NUM_CNT)
-	{
-		return MY_ERR(_Err_Cloud_Data);
-	}
-	for (i = 0; i < s32ArrayCnt; i++)
-	{
-		json_object *pObj = json_object_array_get_idx(pArray, i);
-		const char *pRTmp = json_object_to_json_string(pObj);
-		sscanf(pRTmp, "0x%02hhx", c8R + i);
-		if (c8R[i] != c8ClientR[i])	/* compare the R from the cloud with the R from client */
-		{
-			return MY_ERR(_Err_Authentication);
-		}
-	}
+		*pErr = MY_ERR(_Err_JSON);
+		return NULL;
 	}
 
-	return 0;
+	json_object_object_add(pJsonObj, "sc", json_object_new_string(AUTHENTICATION_SC));
+	json_object_object_add(pJsonObj, "sv", json_object_new_string(AUTHENTICATION_SV));
+
+	{
+	json_object *pInfo, *pIDPS;
+	pInfo = json_object_from_file(GATEWAY_INFO_FILE);
+	if (pInfo == NULL)
+	{
+		PRINT("json_object_from_file error\n");
+		*pErr = MY_ERR(_Err_JSON);
+		json_object_put(pJsonObj);
+		return NULL;
+	}
+	pIDPS = json_object_object_get(pInfo, "IDPS");
+	if (pIDPS == NULL)
+	{
+		*pErr = MY_ERR(_Err_JSON);
+		json_object_put(pInfo);
+		json_object_put(pJsonObj);
+		return NULL;
+	}
+	json_object_get(pIDPS);
+	json_object_object_add(pJsonObj, "IDPS", pIDPS);
+	json_object_put(pInfo);
+	}
+
+	{
+	char c8Tmp[8];
+	sprintf(c8Tmp, "%02hhX", 0xF5);
+	json_object_object_add(pJsonObj, "Command", json_object_new_string(c8Tmp));
+	}
+
+	return pJsonObj;
 }
 
 /* buildup the command of 0xFA, 0xFC, 0xFD for client */
@@ -801,7 +1067,6 @@ json_object *BuildupCmd_0xFB(char c8CloudR[RAND_NUM_CNT], char c8ClientR[RAND_NU
 		int32_t *pErr)
 {
 	int32_t s32Err = 0;
-	int32_t i;
 	json_object *pJsonObj = json_object_new_object();
 	if (pJsonObj == NULL)
 	{
@@ -816,47 +1081,18 @@ json_object *BuildupCmd_0xFB(char c8CloudR[RAND_NUM_CNT], char c8ClientR[RAND_NU
 
 	btea((int32_t *)c8CloudR, RAND_NUM_CNT / sizeof(int32_t), (int32_t *)c8Key);
 	{
-	json_object *pCloudRArr, *pClientRArr, *pData;
-	pCloudRArr = json_object_new_array();
-	if (pCloudRArr == NULL)
-	{
-		PRINT("json_object_new_object");
-		s32Err = MY_ERR(_Err_JSON);
-		goto err;
-	}
-	pClientRArr = json_object_new_array();
-	if (pClientRArr == NULL)
-	{
-		PRINT("json_object_new_object");
-		json_object_put(pCloudRArr);
-		s32Err = MY_ERR(_Err_JSON);
-		goto err;
-	}
-	pData = json_object_new_object();
-	if (pData == NULL)
-	{
-		PRINT("json_object_new_object");
-		json_object_put(pCloudRArr);
-		json_object_put(pClientRArr);
-		s32Err = MY_ERR(_Err_JSON);
-		goto err;
-	}
-
+	char c8CloudBuf[36], c8ClientBuf[36];
+	int32_t i;
 	srand(time(NULL));
 	for (i = 0; i < RAND_NUM_CNT; i++)
 	{
-		char c8Tmp[8];
+		sprintf(c8CloudBuf + (i * 2), "%02hhX", c8CloudR[i]);
 		c8ClientR[i] = rand();
-		sprintf(c8Tmp, "0x%02hhx", c8ClientR[i]);
-		json_object_array_add(pClientRArr, json_object_new_string(c8Tmp));
-		sprintf(c8Tmp, "0x%02hhx", c8CloudR[i]);
-		json_object_array_add(pCloudRArr, json_object_new_string(c8Tmp));
+		sprintf(c8ClientBuf + (i * 2), "%02hhX", c8ClientR[i]);
 	}
-	json_object_object_add(pData, "CodingRandNum", pCloudRArr);
-	json_object_object_add(pData, "ProductID", json_object_new_string_len(c8ID, PRODUCT_ID_CNT));
-	json_object_object_add(pData, "RandNum1", pClientRArr);
-
-	json_object_object_add(pJsonObj, "Data", pData);
+	json_object_object_add(pJsonObj, "GatewayID", json_object_new_string_len(c8ID, PRODUCT_ID_CNT));
+	json_object_object_add(pJsonObj, "RNCoded", json_object_new_string(c8CloudBuf));
+	json_object_object_add(pJsonObj, "RN1", json_object_new_string(c8ClientBuf));
 	}
 	*pErr = s32Err;
 	return pJsonObj;
@@ -900,12 +1136,14 @@ int32_t CloudSendIDPS(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT], const
  * 函数名      : CloudAuthentication
  * 功能        : 云认证
  * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ * 			   : boIsCoordination [in] (bool 类型): 是否通过协调服务器
  *             : c8ID [in] (const char * 类型): 产品ID
  *             : c8Key [in] (const char *): 产品KEY
  * 返回        : 正确返回0, 错误返回错误码
  * 作者        : 许龙杰
  */
-int32_t CloudAuthentication(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT], const char c8Key[XXTEA_KEY_CNT_CHAR])
+int32_t CloudAuthentication(StCloudDomain *pStat, bool boIsCoordination,
+		const char c8ID[PRODUCT_ID_CNT], const char c8Key[XXTEA_KEY_CNT_CHAR])
 {
 	int32_t s32Err = 0;
 	json_object *pJsonObj = NULL;
@@ -918,6 +1156,63 @@ int32_t CloudAuthentication(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT],
 	{
 		return MY_ERR(_Err_InvalidParam);
 	}
+	pJsonObj = BuildupCmdIDPS(&s32Err);
+	if (pJsonObj == NULL)
+	{
+		return MY_ERR(_Err_JSON);
+	}
+
+	sprintf(c8Char, "content=%s", json_object_to_json_string(pJsonObj));
+	json_object_put(pJsonObj);
+	pJsonObj = NULL;
+	PRINT("%s\n", c8Char);
+
+	{
+#if TEST_CLOUD
+	StSendInfo stSendInfo = {false, NULL, AUTHENTICATION_ADDR, NULL, -1};
+
+	if (!boIsCoordination)
+	{
+		stSendInfo.pSecondDomain = AUTHENTICATION_SECOND_DOMAIN;
+	}
+
+	{
+	StMMap stMap = {NULL};
+	stSendInfo.pSendBody = c8Char;
+
+	s32Err = CloudSendAndGetReturn(pStat, &stSendInfo, &stMap);
+	if (s32Err != 0)
+	{
+		return s32Err;
+	}
+	/* analysis the return text */
+	pJsonObj = GetHttpJsonBody(&stMap, &s32Err);
+	CloudMapRelease(&stMap);
+	if (pJsonObj == NULL)
+	{
+		return s32Err;
+	}
+	s32Err = ResolveCmd_0xF5(pJsonObj);
+	if (s32Err == 0xF0)
+	{
+		s32Err = 0;
+		goto end;
+	}
+	else if (s32Err == 0xFD)
+	{
+		s32Err = MY_ERR(_Err_IDPS);
+		goto end;
+	}
+	else if (s32Err != 0xF5)
+	{
+		s32Err = MY_ERR(_Err_Cloud_Data);
+		goto end;
+	}
+	json_object_put(pJsonObj);
+	pJsonObj = NULL;
+
+	}
+#endif
 
 	pJsonObj = BuildupCmd_0xFA_C_D(0xFA, &s32Err);
 	if (pJsonObj == NULL)
@@ -925,15 +1220,14 @@ int32_t CloudAuthentication(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT],
 		return MY_ERR(_Err_JSON);
 	}
 
-	sprintf(c8Char, "Body:%s", json_object_to_json_string(pJsonObj));
+	sprintf(c8Char, "content=%s", json_object_to_json_string(pJsonObj));
 	json_object_put(pJsonObj);
 	pJsonObj = NULL;
 	PRINT("%s\n", c8Char);
 #if TEST_CLOUD
 	{
-	StSendInfo stSendInfo = {false, AUTHENTICATION_ADDR, NULL, -1};
 	StMMap stMap = {NULL};
-	json_object *pReturnValue;
+
 	stSendInfo.pSendBody = c8Char;
 	s32Err = CloudSendAndGetReturn(pStat, &stSendInfo, &stMap);
 	if (s32Err != 0)
@@ -947,12 +1241,7 @@ int32_t CloudAuthentication(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT],
 	{
 		return s32Err;
 	}
-	if (!json_object_object_get_ex(pJsonObj, "ReturnValue", &pReturnValue))
-	{
-		s32Err = MY_ERR(_Err_Cloud_JSON);
-		goto end;
-	}
-	s32Err = ResolveCmd_0xFA(pReturnValue, c8CloudR);
+	s32Err = ResolveCmd_0xFA(pJsonObj, c8CloudR);
 	if (s32Err != 0)
 	{
 		goto end;
@@ -970,16 +1259,14 @@ int32_t CloudAuthentication(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT],
 		PRINT("json_object_new_object");
 		return s32Err;
 	}
-	sprintf(c8Char, "Body:%s", json_object_to_json_string(pJsonObj));
+	sprintf(c8Char, "content=%s", json_object_to_json_string(pJsonObj));
 	json_object_put(pJsonObj);
 	pJsonObj = NULL;
 	PRINT("%s\n", c8Char);
 
 #if TEST_CLOUD
 	{
-	StSendInfo stSendInfo = {false, AUTHENTICATION_ADDR, NULL, -1};
 	StMMap stMap = {NULL};
-	json_object *pReturnValue;
 	stSendInfo.pSendBody = c8Char;
 	s32Err = CloudSendAndGetReturn(pStat, &stSendInfo, &stMap);
 	if (s32Err != 0)
@@ -993,17 +1280,14 @@ int32_t CloudAuthentication(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT],
 	{
 		return s32Err;
 	}
-	if (!json_object_object_get_ex(pJsonObj, "ReturnValue", &pReturnValue))
-	{
-		s32Err = MY_ERR(_Err_Cloud_JSON);
-		goto end;
-	}
-	btea((int32_t *)c8ClientR, RAND_NUM_CNT / sizeof(int32_t), (int32_t *)c8Key);
-	s32Err = ResolveCmd_0xFB(pReturnValue, c8ClientR);
+
+	s32Err = ResolveCmd_0xFB(pJsonObj, c8ClientR, c8Key);
 	json_object_put(pJsonObj);
 	pJsonObj = NULL;
 	}
 #endif
+	}
+#if 0
 	if (s32Err == 0)
 	{
 		pJsonObj = BuildupCmd_0xFA_C_D(0xFC, &s32Err);
@@ -1018,7 +1302,7 @@ int32_t CloudAuthentication(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT],
 		PRINT("%s\n", c8Char);
 #if TEST_CLOUD
 		{
-		StSendInfo stSendInfo = {false, AUTHENTICATION_ADDR, NULL, -1};
+		StSendInfo stSendInfo = {false, NULL, AUTHENTICATION_ADDR, NULL, -1};
 		StMMap stMap = {NULL};
 
 		stSendInfo.pSendBody = c8Char;
@@ -1054,7 +1338,7 @@ int32_t CloudAuthentication(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT],
 		PRINT("%s\n", c8Char);
 #if TEST_CLOUD
 		{
-		StSendInfo stSendInfo = {false, AUTHENTICATION_ADDR, NULL, -1};
+		StSendInfo stSendInfo = {false, NULL, AUTHENTICATION_ADDR, NULL, -1};
 		StMMap stMap = {NULL};
 
 		stSendInfo.pSendBody = c8Char;
@@ -1075,6 +1359,7 @@ int32_t CloudAuthentication(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT],
 		}
 #endif
 	}
+#endif
 #if TEST_CLOUD
 end:
 #endif
@@ -1108,13 +1393,14 @@ json_object *BuildupCmd_0xF5(const char c8ID[PRODUCT_ID_CNT], int32_t *pErr)
 /*
  * 函数名      : CloudKeepAlive
  * 功能        : 云保活
- * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ * 参数        : pStat [in] (StCloudDomain * 类型): 云状态，详见定义
  *             : c8ID [in] (const char * 类型): 产品ID
  * 返回        : 正确返回0, 错误返回错误码
  * 作者        : 许龙杰
  */
-int32_t CloudKeepAlive(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT])
+int32_t CloudKeepAlive(StCloudDomain *pStat, const char c8ID[PRODUCT_ID_CNT])
 {
+#if 0
 	json_object *pJsonObj;
 	char c8Char[PAGE_SIZE];
 	int32_t s32Err = 0;
@@ -1145,6 +1431,117 @@ int32_t CloudKeepAlive(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT])
 	}
 #endif
 	return s32Err;
+#else
+	return 0;
+#endif
 }
 
+#if 0
+void FunctionTest(void)
+{
+	struct addrinfo stFilter = {0};
+	struct addrinfo *pRslt = NULL;
+	int32_t s32Err = 0;
+	stFilter.ai_family = AF_INET;
+	stFilter.ai_socktype = SOCK_STREAM;
+	s32Err = getaddrinfo("www.google.com.hk", NULL, &stFilter, &pRslt);
+	if (s32Err == 0)
+	{
+		struct addrinfo *pTmp = pRslt;
+		while (pTmp != NULL)
+		{
+			PRINT("after inet_ntoa: %s\n", inet_ntoa(((struct sockaddr_in*)(pTmp->ai_addr))->sin_addr));
+			pTmp = pTmp->ai_next;
+		}
+	}
+	else
+	{
+		PRINT("getaddrinfo s32Err = %d, error: %s\n", s32Err, gai_strerror(s32Err));
+	}
 
+}
+#endif
+
+#if 0
+
+void FunctionTest(void)
+{
+	struct hostent *pHost;
+	struct sockaddr_in stAddr;
+	char c8Addr[64];
+
+	pHost = gethostbyname("www.baidu.com");
+	PRINT("www.baidu.com's host(name) is: %s\n", pHost->h_name);
+	PRINT("www.baidu.com's host(AF_INET) is: %hhu.%hhu.%hhu.%hhu\n",
+			pHost->h_addr[0], pHost->h_addr[1], pHost->h_addr[2], pHost->h_addr[3]);
+	PRINT("after inet_ntoa: %s\n", inet_ntoa(*((struct in_addr *)pHost->h_addr)));
+
+	pHost = gethostbyname("74.125.128.199");
+	PRINT("74.125.128.199's host is: %s\n", pHost->h_addr);
+	PRINT("after inet_ntoa: %s\n", inet_ntoa(*((struct in_addr *)pHost->h_addr)));
+
+
+}
+#endif
+
+#if 0
+/*
+ * {IDPS:{"Ptl":"com.jiuan.GW01","Name":" Health Gateway","FVer":"1.0.2","HVer":"1.1.1","MFR":"iHealth","Model":"GW 001","SN":"0000000001"},Ptr:{"Region"="CN"}}
+ */
+void JSONTest()
+{
+	json_object *new_obj, *pSon_obj, *pJson;
+	new_obj = json_object_from_file("/home/lyndon/workspace/nfsboot/GatewayIDPS.idps");
+	printf("new_obj.to_string()=%s\n", json_object_to_json_string_ext(new_obj, JSON_C_TO_STRING_PRETTY));
+
+	pJson = json_object_new_object();
+
+	printf("\n\n");
+	json_object_object_get_ex(new_obj, "IDPS", &pSon_obj);
+	printf("pSon_obj(IDPS).to_string()=%s\n", json_object_to_json_string_ext(pSon_obj, JSON_C_TO_STRING_PRETTY));
+
+	//json_object_get(pSon_obj);
+	json_object_object_add(pJson, "IDPS", pSon_obj);
+
+	printf("\n\n");
+	json_object_object_get_ex(new_obj, "Ptr", &pSon_obj);
+	printf("pSon_obj(Ptr).to_string()=%s\n", json_object_to_json_string(pSon_obj));
+
+	json_object_put(new_obj);
+
+	printf("\n\n");
+	printf("pJson.to_string()=%s\n", json_object_to_json_string(pJson));
+	json_object_put(pJson);
+
+}
+#endif
+
+#if 0
+void JSONTest()
+{
+	json_object *new_obj, *pSon_obj;
+	new_obj = json_tokener_parse("{\"Result\": \"1\",\n\t\t \"TS\": 19923928382000, \"ResultMessage\": \"100\", \"ReturnValue\": null }");
+	json_object_to_file("/home/lyndon/workspace/nfsboot/GatewayIDPS.idps", new_obj);
+	printf("new_obj.to_string()=%s\n", json_object_to_json_string(new_obj));
+
+	printf("\n\n");
+	json_object_object_get_ex(new_obj, "Result", &pSon_obj);
+	printf("pSon_obj(Result).to_string()=%s\n", json_object_to_json_string(pSon_obj));
+
+	printf("\n\n");
+	json_object_object_get_ex(new_obj, "TS", &pSon_obj);
+	printf("pSon_obj(TS).to_string()=%s\n", json_object_to_json_string(pSon_obj));
+	printf("pSon_obj(TS).type=%d\n", json_object_get_type(pSon_obj));
+
+	printf("\n\n");
+	json_object_object_get_ex(new_obj, "ResultMessage", &pSon_obj);
+	printf("pSon_obj(ResultMessage).to_string()=%s\n", json_object_to_json_string(pSon_obj));
+
+	printf("\n\n");
+	json_object_object_get_ex(new_obj, "ReturnValue", &pSon_obj);
+	printf("pSon_obj(ReturnValue).to_string()=%s\n", json_object_to_json_string(pSon_obj));
+	printf("pSon_obj(ReturnValue).type=%d\n", json_object_get_type(pSon_obj));
+
+	json_object_put(new_obj);
+}
+#endif

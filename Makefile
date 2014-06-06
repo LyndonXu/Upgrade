@@ -51,7 +51,7 @@ endif
 ifeq ($(DEBUG), 1)
 CFLAGS += -O0 -g3
 else
-CFLAGS += -O3
+CFLAGS += -O2
 endif
 
 
@@ -138,10 +138,10 @@ cleanall:
 	
 install:
 	@mkdir -p $(INSTALL_DIR)	
-	@cp $(LIB_TARGET) inc/$(PROJECT).h $(INSTALL_DIR)
+	@cp $(LIB_TARGET) $(TARGET) $(TEST_TARGET) inc/$(PROJECT).h $(INSTALL_DIR)
 
 uninstall:
-	@rm -rf $(INSTALL_DIR)$(LIB_TARGET) $(INSTALL_DIR)$(PROJECT).h
+	@rm -rf $(INSTALL_DIR)$(LIB_TARGET) $(INSTALL_DIR)$(TARGET) $(INSTALL_DIR)$(TEST_TARGET) $(INSTALL_DIR)$(PROJECT).h 
 
 DATE=`date +%Y%m%d%H%M%S`
 NAME=backup_$(DATE).tar.bz2

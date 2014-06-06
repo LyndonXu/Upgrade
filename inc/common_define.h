@@ -61,9 +61,9 @@
 
 
 #if HAS_CROSS
-#define WORK_DIR		"/tmp/mytestdir/"
+#define WORK_DIR		"/var/workdir/"
 #else
-#define WORK_DIR		"/tmp/mytestdir/"
+#define WORK_DIR		"/tmp/workdir/"
 #endif
 
 #define PROCESS_DIR		WORK_DIR
@@ -74,6 +74,18 @@
 #define LOG_LOCK_FILE	LOG_DIR"logserver.lock"
 
 #define LOG_FILE		LOG_DIR"logserver.log" /* 套接字关联文件 */
+
+#if HAS_CROSS
+#if defined _DEBUG
+#define GATEWAY_INFO_FILE	"/mnt/GatewayInfo.info"
+#else
+#define GATEWAY_INFO_FILE	WORK_DIR"GatewayInfo.info"
+#endif
+#else
+#define GATEWAY_INFO_FILE	"/home/lyndon/workspace/nfsboot/GatewayInfo.info"
+#endif
+
+#define DB_NAME				WORK_DIR"db"
 
 
 #define CLI_PERM				S_IRWXU
@@ -100,6 +112,26 @@
 
 #define CLOUD_NAME				"CloudStat"
 #define CLOUD_SOCKET			WORK_DIR"CloudSocket.socket"
+
+
+#define XXTEA_KEYCNT			(128)
+#define XXTEA_KEY_CNT_CHAR		(XXTEA_KEYCNT / sizeof(char))
+
+#define RAND_NUM_CNT			(16)
+#define PRODUCT_ID_CNT			(16)
+
+#define IPV4_ADDR_LENGTH		(16)
+
+#define COORDINATION_DOMAINA				"www.jiuan.com:443"
+#define AUTHENTICATION_SC					"asdfaslkjfhaslkjdcaskjdh"
+#define AUTHENTICATION_SV					"asdfdfdadfabghkhjhkykjdh"
+#define AUTHENTICATION_ADDR					"gateway/auth"
+#define AUTHENTICATION_SECOND_DOMAIN		"api"
+
+#define KEEPALIVE_SC						"asdfaslkjfhaslkjdcaskjdh"
+#define KEEPALIVE_SV						"asdfdfdadfabghkhjhkykjdh"
+#define KEEPALIVE_ADDR						"keepalive.htm"
+
 
 #define LIB_COMPLINE			1
 
@@ -367,8 +399,15 @@ typedef struct _tagStCloudStat
 {
 	EmCloudStat emStat;					/* 云在线状态 */
 	char c8ClientIPV4[16]; 				/* 可用的IP地址 192.168.100.100\0 */
-	char c8ServerURL[256];				/* 服务器URL */
 }StCloudStat;							/* 云状态 */
+
+
+typedef struct _tagStCloudDomain
+{
+	StCloudStat stStat;
+	char c8Domain[64];					/* 服务器一级域名 */
+	int32_t s32Port;					/* 端口 */
+}StCloudDomain;							/* 通讯信息 */
 
 typedef struct _tagStCloud
 {
@@ -376,11 +415,14 @@ typedef struct _tagStCloud
 	StCloudStat stStat;					/*  */
 }StCloud;								/* 云状态共享内存实体 */
 
+typedef void *DBHANDLE;
+
 typedef struct _tagStCloudHandle		/* 与StSLOHandle类似 */
 {
 	int32_t s32LockHandle;
 	int32_t s32SHMHandle;
 	StCloud *pCloud;
+	DBHANDLE pDBHandle;					/* 数据库句柄 */
 }StCloudHandle;
 
 
@@ -438,6 +480,7 @@ enum
 	_Err_NotADir,
 	_Err_JSON,
 	_Err_Authentication,
+	_Err_IDPS,
 
 	_Err_Cloud_IsNotOnline = 0x120,
 	_Err_Cloud_Body,
@@ -445,6 +488,13 @@ enum
 	_Err_Cloud_CMD,
 	_Err_Cloud_Data,
 	_Err_Cloud_Authentication,
+	_Err_Cloud_Save_Domain,
+	_Err_Cloud_Get_Domain,
+
+	_Err_Cloud_Result = 0x130,
+
+	_Err_Unkown_Host = 0x140,
+
 
 	_Err_HTTP = 0x1000,
 

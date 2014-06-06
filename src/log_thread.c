@@ -79,16 +79,22 @@ void *ThreadLogServer(void *pArg)
 		else
 		{
 			uint32_t u32Size = 0;
+			int32_t s32Err = 0;
 			void *pMCSStream;
-			pMCSStream = MCSSyncReceive(s32Client, false, 1000, &u32Size, NULL);
+			pMCSStream = MCSSyncReceive(s32Client, false, 1000, &u32Size, &s32Err);
 			if (pMCSStream != NULL)
 			{
 				LogFileCtrlWriteLog(s32LogHandle, pMCSStream, u32Size);
+				PRINT("msg: %s\n", (char *)pMCSStream);
 
 #if 0
 				MCSResolve((const char *)pMCSStream, u32Size, MCSCallBack, (void *)s32LogHandle);
 #endif
 				MCSSyncFree(pMCSStream);
+			}
+			else
+			{
+				PRINT("MCSSyncReceive error 0x%08x\n", s32Err);
 			}
 			close(s32Client);
 		}

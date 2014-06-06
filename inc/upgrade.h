@@ -12,7 +12,7 @@
 
 #include <sys/types.h>
 #include <dirent.h>
-
+#include <netinet/in.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -640,9 +640,48 @@ typedef struct _tagStCloudStat
 {
 	EmCloudStat emStat;					/* 云在线状态 */
 	char c8ClientIPV4[16]; 				/* 可用的IP地址 192.168.100.100\0 */
-	char c8ServerURL[256];				/* 服务器URL */
 }StCloudStat;							/* 云状态 */
+
+
+typedef struct _tagStCloudDomain
+{
+	StCloudStat stStat;
+	char c8Domain[64];					/* 服务器一级域名 */
+	int32_t s32Port;					/* 端口 */
+}StCloudDomain;							/* 通讯信息 */
+
+typedef void *DBHANDLE;
+
+#define XXTEA_KEYCNT			(128)
+#define XXTEA_KEY_CNT_CHAR		(XXTEA_KEYCNT / sizeof(char))
+
+#define RAND_NUM_CNT			(16)
+#define PRODUCT_ID_CNT			(16)
+
+#define IPV4_ADDR_LENGTH		(16)
 #endif
+/*
+ * Flags for db_store().
+ */
+#define DB_INSERT	   1	/* insert new record only */
+#define DB_REPLACE	   2	/* replace existing record */
+#define DB_STORE	   3	/* replace or insert */
+
+/*
+ * Implementation limits.
+ */
+#define IDXLEN_MIN	   6	/* key, sep, start, sep, length, \n */
+#define IDXLEN_MAX	1024	/* arbitrary */
+#define DATLEN_MIN	   2	/* data byte, newline */
+#define DATLEN_MAX	1024	/* arbitrary */
+
+DBHANDLE db_open(const char *pathname, int32_t oflag, ...);
+void db_close(DBHANDLE h);
+char *db_fetch(DBHANDLE h, const char *key);
+int32_t db_store(DBHANDLE h, const char *key, const char *data, int32_t flag);
+int32_t db_delete(DBHANDLE h, const char *key);
+void db_rewind(DBHANDLE h);
+char *db_nextrec(DBHANDLE h, char *key);
 
 /*
  * 函数名      : CloudTombDestroy
@@ -677,7 +716,7 @@ int32_t CloudGetStat(int32_t s32Handle, StCloudStat *pStat);
  * 功能        : 通过句柄设置云状态
  * 参数        : s32Handle [in] (int32_t): CloudInit返回的句柄
  * 			   : pStat[out] (StCloudStat *): 保存云状态，详见定义
- * 返回值      : int32_t 型数据, 0失败, 否则成功
+ * 返回值      : int32_t 型数据, 0成功, 否则表示错误码
  * 作者        : 许龙杰
  */
 int32_t CloudSetStat(int s32Handle, StCloudStat *pStat);
@@ -701,6 +740,7 @@ typedef struct _tagStMMap
 typedef struct _tagStSendInfo
 {
 	bool boIsGet;					/* 通过GET方法发送?, 否则通过POST方法发送 */
+	const char *pSecondDomain;		/* 二级域名 */
 	const char *pFile;				/* URL地址(后半部分) */
 	const char *pSendBody;			/* 发送的实体 */
 	int32_t s32BodySize;			/* 发送的实体的长度 */
@@ -726,13 +766,13 @@ void SSL_Destory(void);
 /*
  * 函数名      : CloudSendAndGetReturn
  * 功能        : 向云发送数据并得到返回，保存在pMap中
- * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ * 参数        : pStat [in] (StCloudDomain * 类型): 云状态，详见定义
  *             : pSendInfo [in] (StSendInfo 类型): 发送信息，详见定义
  *             : pMap [out] (StMMap *): 保存返回内容，详见定义，使用过之后必须使用CloudMapRelease销毁
  * 返回        : 正确返回0, 错误返回错误码
  * 作者        : 许龙杰
  */
-int32_t CloudSendAndGetReturn(StCloudStat *pStat, StSendInfo *pSendInfo, StMMap *pMap);
+int32_t CloudSendAndGetReturn(StCloudDomain *pStat, StSendInfo *pSendInfo, StMMap *pMap);
 
 /*
  * 函数名      : CloudMapRelease
@@ -743,47 +783,96 @@ int32_t CloudSendAndGetReturn(StCloudStat *pStat, StSendInfo *pSendInfo, StMMap 
  */
 void CloudMapRelease(StMMap *pMap);
 
+typedef enum _tagEmRegionType
+{
+	_Region_HTTPS,
+	_Region_UDP,
 
-#define XXTEA_KEYCNT			(128)
-#define XXTEA_KEY_CNT_CHAR		(XXTEA_KEYCNT / sizeof(char))
+	_Region_Reserved,
+}EmRegionType;
 
-#define RAND_NUM_CNT			(16)
-#define PRODUCT_ID_CNT			(16)
+/*
+ * 函数名      : CloudSaveDomainViaRegion
+ * 功能        : 保存区域对应的域名[:端口]
+ * 参数        : s32Handle [in] (int32_t): CloudInit返回的句柄
+ * 			   : emType[in] (EmRegionType): 要查找域名的类别
+ * 			   : pRegion[in] (const char *): 域名的关键值, 区域编号, 例如: "CN"、"EN"、"US"......,
+ * 			     必须是以\0为结尾的字符串
+ * 			   : pDomain[in] (const char *): 域名的内容[:端口], 例如:"wehealth.com[:443]"("[]"代表可有可无，
+ * 			     没有的话为默认443), 必须是以\0为结尾的字符串
+ * 返回值      : int32_t 型数据, 0成功, 否则表示错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudSaveDomainViaRegion(int s32Handle, EmRegionType emType,
+		const char *pRegion, const char *pDomain);
 
-#define AUTHENTICATION_SC		"asdfaslkjfhaslkjdcaskjdh"
-#define AUTHENTICATION_SV		"asdfdfdadfabghkhjhkykjdh"
-#define AUTHENTICATION_ADDR		"authentication.htm"
+/*
+ * 函数名      : CloudGetDomainFromRegion
+ * 功能        : 得到区域对应的域名[:端口]
+ * 参数        : s32Handle [in] (int32_t): CloudInit返回的句柄
+ * 			   : emType[in] (EmRegionType): 要查找域名的类别
+ * 			   : pRegion[in] (const char *): 域名的关键值, 区域编号, 例如: "CN"、"EN"、"US"......,
+ * 			     必须是以\0为结尾的字符串
+ * 			   : pDomain[out] (char *): 成功保存域名的内容[:端口], 例如:"wehealth.com[:443]"("[]"代表可有可无，
+ * 			     没有的话为默认443), 必须是以\0为结尾的字符串
+ * 			     u32Size[out] (uint32_t): 指明pDomain指向字符串的大小
+ * 返回值      : int32_t 型数据, 0成功, 否则表示错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudGetDomainFromRegion(int s32Handle, EmRegionType emType,
+		const char *pRegion, char *pDomain, uint32_t u32Size);
 
-#define KEEPALIVE_SC			"asdfaslkjfhaslkjdcaskjdh"
-#define KEEPALIVE_SV			"asdfdfdadfabghkhjhkykjdh"
-#define KEEPALIVE_ADDR			"keepalive.htm"
+
+/*
+ * 函数名      : GetRegionOfGateway
+ * 功能        : 得到Gateway的区域信息
+ * 参数        : pRegion [out] (char * 类型): 成功保存区域字符串
+ *             : uint32_t [in] (uint32_t 类型): pRegion指向字符串的长度
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t GetRegionOfGateway(char *pRegion, uint32_t u32Size);
+
+/*
+ * 函数名      : GetDomainPortFromString
+ * 功能        : 得到Gateway的区域信息
+ * 参数        : pStr [in] (const char * 类型): 要解析的符串(以'\0'结尾), 例如"www.jiuan.com[:443]"
+ * 			   : pDomain [out] (char * 类型): 成功保存域名
+ *             : uint32_t [in] (uint32_t 类型): pDomain指向字符串的长度
+ *             : pPort [out] (uint32_t * 类型): 成功保存段口号
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t GetDomainPortFromString(const char *pStr, char *pDomain, uint32_t u32Size, int32_t *pPort);
+
 
 /*
  * 函数名      : CloudAuthentication
  * 功能        : 云认证
  * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ * 			   : boIsCoordination [in] (bool 类型): 是否通过协调服务器
  *             : c8ID [in] (const char * 类型): 产品ID
  *             : c8Key [in] (const char *): 产品KEY
  * 返回        : 正确返回0, 错误返回错误码
  * 作者        : 许龙杰
  */
-int32_t CloudAuthentication(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT],
-		const char c8Key[XXTEA_KEY_CNT_CHAR]);
+int32_t CloudAuthentication(StCloudDomain *pStat, bool boIsCoordination,
+		const char c8ID[PRODUCT_ID_CNT], const char c8Key[XXTEA_KEY_CNT_CHAR]);
 
 /*
  * 函数名      : CloudKeepAlive
  * 功能        : 云保活
- * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ * 参数        : pStat [in] (StCloudDomain * 类型): 云状态，详见定义
  *             : c8ID [in] (const char * 类型): 产品ID
  * 返回        : 正确返回0, 错误返回错误码
  * 作者        : 许龙杰
  */
-int32_t CloudKeepAlive(StCloudStat *pStat, const char c8ID[PRODUCT_ID_CNT]);
+int32_t CloudKeepAlive(StCloudDomain *pStat, const char c8ID[PRODUCT_ID_CNT]);
 
 typedef struct _tagStIPV4Addr
 {
 	char c8Name[16];				/* 用于保存网卡的名字 */
-	char c8IPAddr[16];				/* 用于保存网卡的IP */
+	char c8IPAddr[IPV4_ADDR_LENGTH];				/* 用于保存网卡的IP */
 }StIPV4Addr;						/* IPV4网卡信息 */
 
 /*
@@ -796,7 +885,16 @@ typedef struct _tagStIPV4Addr
  * 作者        : 许龙杰
  */
 int32_t GetIPV4Addr(StIPV4Addr *pAddrOut, uint32_t *pCnt);
-
+/*
+ * 函数名      : GetHostIPV4Addr
+ * 功能        : 解析域名或者IPV4的IPV4地址
+ * 参数        : pHost [in] (const char * 类型): 详见定义
+ *             : c8IPV4Addr [in/out] (char * 类型): 用于保存dotted-decimal类型IP地址
+ *             : pInternetAddr [in/out] (struct in_addr * 类型): 用户保存Internet类型地址
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t GetHostIPV4Addr(const char *pHost, char c8IPV4Addr[IPV4_ADDR_LENGTH], struct in_addr *pInternetAddr);
 /*
  * 函数名      : TimeGetTime
  * 功能        : 得到当前系统时间 (MS级)
@@ -808,15 +906,6 @@ uint64_t TimeGetTime(void);
 
 
 typedef void *DBHANDLE;
-
-DBHANDLE db_open(const char *pathname, int32_t oflag, ...);
-void db_close(DBHANDLE h);
-char *db_fetch(DBHANDLE h, const char *key);
-int32_t db_store(DBHANDLE h, const char *key, const char *data, int32_t flag);
-int32_t db_delete(DBHANDLE h, const char *key);
-void db_rewind(DBHANDLE h);
-char *db_nextrec(DBHANDLE h, char *key);
-
 /*
  * Flags for db_store().
  */
@@ -831,6 +920,16 @@ char *db_nextrec(DBHANDLE h, char *key);
 #define IDXLEN_MAX	1024	/* arbitrary */
 #define DATLEN_MIN	   2	/* data byte, newline */
 #define DATLEN_MAX	1024	/* arbitrary */
+
+DBHANDLE db_open(const char *pathname, int32_t oflag, ...);
+void db_close(DBHANDLE h);
+char *db_fetch(DBHANDLE h, const char *key);
+int32_t db_store(DBHANDLE h, const char *key, const char *data, int32_t flag);
+int32_t db_delete(DBHANDLE h, const char *key);
+void db_rewind(DBHANDLE h);
+char *db_nextrec(DBHANDLE h, char *key);
+
+
 
 #ifdef __cplusplus
 }
