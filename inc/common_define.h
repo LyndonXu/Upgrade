@@ -58,7 +58,11 @@
 
 #define MY_ERR(code)        ERROR_CODE(0x15, (code))
 
+#pragma pack(4)
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #if HAS_CROSS
 #define WORK_DIR		"/var/workdir/"
@@ -415,14 +419,12 @@ typedef struct _tagStCloud
 	StCloudStat stStat;					/*  */
 }StCloud;								/* 云状态共享内存实体 */
 
-typedef void *DBHANDLE;
-
 typedef struct _tagStCloudHandle		/* 与StSLOHandle类似 */
 {
 	int32_t s32LockHandle;
 	int32_t s32SHMHandle;
 	StCloud *pCloud;
-	DBHANDLE pDBHandle;					/* 数据库句柄 */
+	void *pDBHandle;					/* 数据库句柄 */
 }StCloudHandle;
 
 
@@ -502,6 +504,7 @@ enum
 
 	_Err_SYS = 0xFF00,
 
+	_Err_Common = 0xFFFF,
 };
 
 #ifdef _DEBUG
@@ -510,5 +513,8 @@ enum
 #define PRINT(x, ...)
 #endif
 
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* COMMON_DEFINE_H_ */

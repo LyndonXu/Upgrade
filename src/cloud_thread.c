@@ -80,7 +80,7 @@ void *ThreadError(void *pArg)
 }
 
 /*
- * why we should open a socket read and write it abidingly? think that, we send some message via a socket
+ * why we should open a socket reading and writing it abidingly? think that, we send some message via a socket
  * and then close it. normally, we bind a port randomly(allocated by the system), after that we send a message
  * to a server, the server will get our IP address and port, and the server will echo a message via this
  * address:port, but unfortunately, we have closed the channel, how we can get the echo?
@@ -100,7 +100,10 @@ void *ThreadKeepAlive(void *pArg)
 		PRINT("socket error: %s\n", strerror(errno));
 		return NULL;
 	}
-
+	/*
+	 * why we don't bind the socket to the local IP address?
+	 * because we don't know whether the gateway has passed the authentication
+	 */
 
 	while (!g_boIsExit)
 	{
@@ -145,7 +148,7 @@ void *ThreadKeepAlive(void *pArg)
 				struct sockaddr_in stServerAddr = {0};
 				stServerAddr.sin_family = AF_INET;
 				stServerAddr.sin_port = htons(stStat.s32Port);
-				/* get the IPV4 address of host via DNS(in this application, the host just has a IP address)  */
+				/* get the IPV4 address of host via DNS(in this application, the host just has one IP address)  */
 				if (GetHostIPV4Addr(stStat.c8Domain, NULL, &(stServerAddr.sin_addr)) != 0)
 				{
 					goto next;
@@ -178,7 +181,7 @@ next:
 				}
 				else
 				{
-					/* every time we send, we should check whether the self IP address is changed */
+					/* every time we send, we should check whether the local IP address is changed */
 					s32Err = CloudGetStat(s_s32CloudHandle, &(stStat.stStat));
 					if (s32Err != 0)
 					{
@@ -203,8 +206,8 @@ next:
 							if (u32LocalInternetAddr != pTmpAddr->sin_addr.s_addr)
 							{
 								/*
-								 * we find that the address has changed, we should re-bind it, but very sorry,
-								 * there is no right system API can finish it directly, so, we close the socket
+								 * we find that the address has changed, we should re-bind the socket, but very sorry,
+								 * there is no right system API can finish this directly, so, we close the socket
 								 * and open a new socket, then, bind it
 								 */
 								close(s32Socket);

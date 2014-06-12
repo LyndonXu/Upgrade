@@ -47,7 +47,7 @@ void CloudTombDestroy(int32_t s32Handle)
 	LockClose(pHandle->s32LockHandle);
 	if (pHandle->pDBHandle != NULL)
 	{
-		db_close(pHandle->pDBHandle);
+		DBClose(pHandle->pDBHandle);
 	}
 	free(pHandle);
 }
@@ -128,7 +128,7 @@ int32_t CloudInit(int32_t *pErr)
 
 shm_ok:
 	LockUnlock(pHandle->s32LockHandle);
-	pHandle->pDBHandle = db_open(DB_NAME,  O_RDWR | O_CREAT | O_TRUNC, MODE_RW);
+	pHandle->pDBHandle = DBOpen(DB_NAME,  O_RDWR | O_CREAT | O_TRUNC, MODE_RW);
 	return (int32_t)pHandle;
 err1:
 	CloudTombDestroy((int32_t)pHandle);
@@ -244,7 +244,7 @@ int32_t CloudSaveDomainViaRegion(int s32Handle,  EmRegionType emType,
 	{
 	char c8Key[64];
 	snprintf(c8Key, 64, "%s_%s", c_pRegionPrefix[emType], pRegion);
-	if (db_store(pHandle->pDBHandle, c8Key, pDomain, DB_STORE) == -1)
+	if (DBStore(pHandle->pDBHandle, c8Key, pDomain, DB_STORE) == -1)
 	{
 		return MY_ERR(_Err_Cloud_Save_Domain);
 	}
@@ -280,7 +280,7 @@ int32_t CloudGetDomainFromRegion(int32_t s32Handle, EmRegionType emType,
 	char *pBuf;
 	char c8Key[64];
 	snprintf(c8Key, 64, "%s_%s", c_pRegionPrefix[emType], pRegion);
-	pBuf = db_fetch(pHandle->pDBHandle, c8Key);
+	pBuf = DBFetch(pHandle->pDBHandle, c8Key);
 	if (pBuf == NULL)
 	{
 		PRINT("cannot find domain form database via key: %s\n", pRegion);
@@ -1435,6 +1435,367 @@ int32_t CloudKeepAlive(StCloudDomain *pStat, const char c8ID[PRODUCT_ID_CNT])
 	return 0;
 #endif
 }
+
+
+/*
+ * 函数名      : UDPKAInit
+ * 功能        : UDP保活超时结构体初始化, 与UDPKADestroy成对使用
+ * 参数        : 无
+ * 返回        : StUDPKeepalive *类型, 错误返回指针NULL, 其余正确
+ * 作者        : 许龙杰
+ */
+StUDPKeepalive *UDPKAInit(void)
+{
+	int32_t i;
+	StUDPKeepalive *pUDP = (StUDPKeepalive *)calloc(1, sizeof(StUDPKeepalive));
+
+	if (pUDP == NULL)
+	{
+		return NULL;
+	}
+	for (i = 0; i < CMD_CNT - 1; i++)
+	{
+		pUDP->stUDPInfo[i].pNext = pUDP->stUDPInfo + i + 1;
+	}
+	pUDP->stUDPInfo[i].pNext = pUDP->stUDPInfo;
+	pUDP->stUDPInfo[0].pPrev = pUDP->stUDPInfo + i;
+	for (i = 1; i < CMD_CNT; i++)
+	{
+		pUDP->stUDPInfo[i].pPrev = pUDP->stUDPInfo + i - 1;
+	}
+	return pUDP;
+}
+
+/*
+ * 函数名      : UDPKAAddASendTime
+ * 功能        : 当发送一个心跳包后, 将报序号和发送的时间记录
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ *             : u16SendNum [in] (uint16_t) 包序号
+ *             : u64SendTime[in] (uint64_t) 发送的时间
+ * 返回        : int32_t类型, 正确返回0, 否则返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t UDPKAAddASendTime(StUDPKeepalive *pUDP, uint16_t u16SendNum,
+	uint64_t u64SendTime)
+{
+	if (pUDP == NULL)
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+
+	pUDP->u16LatestSendNum = u16SendNum;
+
+	if (pUDP->u16SendCnt == 0)
+	{
+		pUDP->u16OldestSendNum = u16SendNum;
+		pUDP->pCur = pUDP->pOldest = pUDP->stUDPInfo;
+	}
+	pUDP->pCur->u16QueueNum = u16SendNum;
+	pUDP->pCur->u64SendTime = u64SendTime;
+	pUDP->pCur->u64ReceivedTime = 0;
+
+	pUDP->pCur = pUDP->pCur->pNext;
+
+	if (pUDP->u16SendCnt == CMD_CNT)
+	{
+		pUDP->pOldest = pUDP->pOldest->pNext;
+	}
+	else
+	{
+		pUDP->u16SendCnt++;
+	}
+	return 0;
+}
+
+/*
+ * 函数名      : UDPKAAddAReceivedTime
+ * 功能        : 当受到一个心跳包后, 将报序号, 接收的时间和服务器发送记录时的时间记录
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ *             : Received [in] (uint16_t) 包序号
+ *             : u64SendTime[in] (uint64_t) 接收的时间
+ *             : u64ServerTime[in] (uint64_t) 服务器发送记录时的时间
+ * 返回        : int32_t类型, 正确返回0, 否则返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t UDPKAAddAReceivedTime(StUDPKeepalive *pUDP, uint16_t u16ReceivedNum,
+	uint64_t u64ReceivedTime, uint64_t u64ServerTime)
+{
+
+	if (pUDP == NULL)
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	if (pUDP->u16SendCnt == 0)
+	{
+		return MY_ERR(_Err_Common);
+	}
+	{
+	int32_t i;
+	StUDPInfo *pInfo = pUDP->pCur->pPrev;
+	for (i = pUDP->u16SendCnt; i > 0; i++)
+	{
+		if (pInfo->u16QueueNum == u16ReceivedNum)
+		{
+			pUDP->u16LatestReceivedNum = u16ReceivedNum;
+			pInfo->u64ReceivedTime = u64ReceivedTime;
+			pInfo->u64ServerTime = u64ServerTime;
+			return 0;
+		}
+		pInfo = pInfo->pPrev;
+	}
+	}
+	return MY_ERR(_Err_Common);
+}
+
+/*
+ * 函数名      : UDPKAAddAReceivedTime
+ * 功能        : 判断当前记录的数据中, UDP保活是否已经超时
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ * 返回        : bool类型, 超时返回true, 否则返回false
+ * 作者        : 许龙杰
+ */
+bool UPDKAIsTimeOut(StUDPKeepalive *pUDP)
+{
+	if (pUDP == NULL)
+	{
+		return true;
+	}
+
+	if ((pUDP->u16LatestSendNum - pUDP->u16LatestReceivedNum) > TIMEOUT_CNT)
+	{
+		return true;
+	}
+	return false;
+}
+
+/*
+ * 函数名      : UDPKAReset
+ * 功能        : 将记录数据复位
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ * 返回        : 无
+ * 作者        : 许龙杰
+ */
+void UDPKAReset(StUDPKeepalive *pUDP)
+{
+	if(pUDP != NULL)
+	{
+		pUDP->u16SendCnt = 0;
+	}
+}
+
+/*
+ * 函数名      : UDPKADestroy
+ * 功能        : 销毁资源, 与UDPKAInit成对使用
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ * 返回        : 无
+ * 作者        : 许龙杰
+ */
+void UDPKADestroy(StUDPKeepalive *pUDP)
+{
+	if (pUDP != NULL)
+	{
+		free(pUDP);
+	}
+}
+
+#define SDCARD_DIR		"/home/lyndon/workspace/SDCard/"
+#define UPDATE_DIR		SDCARD_DIR"Update/"
+#define RUN_DIR			SDCARD_DIR"Run/"
+#define BACKUP_DIR		SDCARD_DIR"Backup/"
+#define LIST_FILE		"FileList.json"
+
+#define UPDATE_FILENAME_LENGTH			64
+typedef struct _tagStUpdateFileInfo
+{
+	char c8Name[UPDATE_FILENAME_LENGTH];
+	uint32_t u32FileType;
+	uint32_t u32Version;
+	uint32_t u32OldVersion;
+	uint32_t u32CRC32;
+}StUpdateFileInfo;
+
+
+StUpdateFileInfo *GetUpdateFileArray(json_object *pListNew, json_object *pListOld)
+{
+	if ((pListNew == NULL) || (pListOld == NULL))
+	{
+		PRINT("error arg\n");
+		return NULL;
+	}
+	else
+	{
+		int32_t i, s32UpdateCnt;
+		int32_t s32NewLength = json_object_array_length(pListNew);
+		int32_t s32OldLength = json_object_array_length(pListOld);
+		StUpdateFileInfo *pNew, *pOld;
+		char c8Buf[16];
+
+
+		pNew = malloc(sizeof(StUpdateFileInfo) * (s32NewLength + 1));
+		pOld = malloc(sizeof(StUpdateFileInfo) * s32OldLength);
+
+		if ((pNew == NULL) || (pOld == NULL))
+		{
+			goto end;
+		}
+
+#define JSON_TRANSLATE(src, dest, length)\
+for(i = 0; i < length; i++)\
+{\
+	json_object *pObj;\
+	json_object *pObjNew = json_object_array_get_idx(src, i);\
+	char *pTmp;\
+	StUpdateFileInfo *pInfo = dest + i;\
+	PRINT("\t[%d]=%s\n", i, json_object_to_json_string(pObjNew));\
+\
+	pObj = json_object_object_get(pObjNew, "FileName");\
+	strncpy(pInfo->c8Name, json_object_to_json_string(pObj) + 1, UPDATE_FILENAME_LENGTH);\
+	pTmp = strrchr(pInfo->c8Name, '_');\
+	if (pTmp != NULL)\
+	{\
+		pTmp[0] = 0;	/* truncation */ \
+	}\
+	pObj = json_object_object_get(pObjNew, "FileType");\
+	pInfo->u32FileType = json_object_get_int(pObj);\
+\
+	pObj = json_object_object_get(pObjNew, "Version");\
+	strncpy(c8Buf, json_object_to_json_string(pObj), 16);\
+	PRINT("version: %s\n", c8Buf);\
+	pTmp = (char *)(&(pInfo->u32Version));\
+	pInfo->u32Version = 0;\
+	sscanf(c8Buf, "\"%hhd.%hhd.%hhd\"", pTmp + 2, pTmp + 1, pTmp);\
+\
+	pObj = json_object_object_get(pObjNew, "CRC32");\
+	strncpy(c8Buf, json_object_to_json_string(pObj), 16);\
+	sscanf(c8Buf, "%08X", &(pInfo->u32CRC32));\
+}
+
+		JSON_TRANSLATE(pListNew, pNew, s32NewLength);
+		JSON_TRANSLATE(pListOld, pOld, s32OldLength);
+
+		s32UpdateCnt = 0;
+		for (i = 0; i < s32NewLength; i++)
+		{
+			int32_t j;
+			for (j = 0; j < s32OldLength; j++)
+			{
+				if (strcmp(pNew[i].c8Name, pOld[j].c8Name) == 0)
+				{
+					PRINT("name: %s\n", pNew[i].c8Name);
+					PRINT("version: %06X, old version: %06X\n",
+							pNew[s32UpdateCnt].u32Version, pOld[j].u32Version);
+					if (pNew[i].u32Version > pOld[j].u32Version)
+					{
+						pNew[s32UpdateCnt] = pNew[i];
+						pNew[s32UpdateCnt].u32OldVersion = pOld[j].u32Version;
+						s32UpdateCnt++;
+					}
+					break;
+				}
+			}
+			if (j == s32OldLength)	/* new file */
+			{
+				pNew[s32UpdateCnt] = pNew[i];
+				pNew[s32UpdateCnt].u32OldVersion = 0;
+				s32UpdateCnt++;
+			}
+		}
+		pNew[s32UpdateCnt].c8Name[0] = 0;
+end:
+		if (pOld != NULL)
+		{
+			free(pOld);
+		}
+		return pNew;
+	}
+}
+
+int32_t UpdateFileCopyToRun()
+{
+	json_object *pListNew = NULL;
+	json_object *pListOld = NULL;
+	int32_t s32Err;
+	StUpdateFileInfo *pInfo = NULL;
+
+	char c8FileName[_POSIX_PATH_MAX];
+
+	sprintf(c8FileName, "%s%s", UPDATE_DIR, LIST_FILE);
+	PRINT("file name %s\n", c8FileName);
+	pListNew = json_object_from_file(c8FileName);
+	if (pListNew == NULL)
+	{
+		PRINT("json_object_from_file error\n");
+		s32Err = MY_ERR(_Err_JSON);
+		goto end;
+	}
+
+	sprintf(c8FileName, "%s%s", RUN_DIR, LIST_FILE);
+	PRINT("file name %s\n", c8FileName);
+	pListOld = json_object_from_file(c8FileName);
+	if (pListOld == NULL)
+	{
+		PRINT("json_object_from_file error\n");
+		s32Err = MY_ERR(_Err_JSON);
+		goto end;
+	}
+	pInfo = GetUpdateFileArray(json_object_object_get(pListNew, "FileList"),
+			json_object_object_get(pListOld, "FileList"));
+	if (pInfo != NULL)
+	{
+		int32_t s32Cnt = 0;
+
+		char c8Buf[1024];
+
+		/* copy the list file from the run directory to backup directoy */
+		sprintf(c8Buf, "cp -f %s%s %s%s", RUN_DIR, LIST_FILE, BACKUP_DIR, LIST_FILE);
+		system(c8Buf);
+
+		while(pInfo[s32Cnt].c8Name[0] != 0)
+		{
+			StUpdateFileInfo *pInfoTmp = pInfo + s32Cnt;
+			PRINT("FileName: %s\n, type: %d, new version: %06X, old version: %06X\n",
+					pInfoTmp->c8Name, pInfoTmp->u32FileType,
+					pInfoTmp->u32Version, pInfoTmp->u32OldVersion);
+
+			/* remove the backup file from the backup directory */
+			sprintf(c8Buf, "rm -f %s%s_*", BACKUP_DIR, pInfoTmp->c8Name);
+			system(c8Buf);
+
+			/* copy the run file to the backup directory */
+			sprintf(c8Buf, "cp -f %s%s_* %s", RUN_DIR, pInfoTmp->c8Name, BACKUP_DIR);
+			system(c8Buf);
+
+			/* remove the run file from the run directory */
+			sprintf(c8Buf, "rm -f %s%s_*", RUN_DIR, pInfoTmp->c8Name);
+			system(c8Buf);
+
+			/* copy the update file to the run directory */
+			sprintf(c8Buf, "cp -f %s%s_* %s", UPDATE_DIR, pInfoTmp->c8Name, RUN_DIR);
+			system(c8Buf);
+
+			s32Cnt++;
+		}
+		/* copy the list file from the update directory to run directoy */
+		sprintf(c8Buf, "cp -f %s%s %s%s", UPDATE_DIR, LIST_FILE, RUN_DIR, LIST_FILE);
+		system(c8Buf);
+
+	}
+end:
+	if (pListNew != NULL)
+	{
+		json_object_put(pListNew);
+	}
+	if (pListOld != NULL)
+	{
+		json_object_put(pListOld);
+	}
+	if (pInfo != NULL)
+	{
+		free(pInfo);
+	}
+	return s32Err;
+}
+
 
 #if 0
 void FunctionTest(void)

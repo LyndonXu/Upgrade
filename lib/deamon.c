@@ -210,7 +210,7 @@ bool AlreadyRunningUsingLockFile(const char *pLockFile)
 }
 
 
-int32_t TranversaDirCallback(const char *pCurPath, struct dirent *pInfo, void *pContext)
+int32_t TraversalDirCallback(const char *pCurPath, struct dirent *pInfo, void *pContext)
 {
 	/* not a directory */
 	if ((pInfo->d_type & DT_DIR) == 0)
@@ -260,7 +260,7 @@ bool AlreadyRunningUsingName(const char *pName)
 		return false;
 	}
 
-	s32Rslt = TranversaDir("/proc/", false, TranversaDirCallback, (void *)pName);
+	s32Rslt = TraversalDir("/proc/", false, TraversalDirCallback, (void *)pName);
 
 	if (s32Rslt == 1)
 	{

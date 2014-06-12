@@ -3,6 +3,15 @@
 #include <sys/uio.h>	/* struct iovec */
 
 /*
+ * Implementation limits.
+ */
+#define IDXLEN_MIN	   6	/* key, sep, start, sep, length, \n */
+#define IDXLEN_MAX	1024	/* arbitrary */
+#define DATLEN_MIN	   2	/* data byte, newline */
+#define DATLEN_MAX	1024	/* arbitrary */
+
+
+/*
  * Internal index file constants.
  * These are used to construct records in the
  * index file and data file.
@@ -24,6 +33,16 @@
 
 typedef uint32_t DBHASH; /* hash values */
 typedef uint32_t COUNT; /* unsigned counter */
+
+#define db_open DBOpen
+#define db_close DBClose
+#define db_fetch DBFetch
+#define db_store DBStore
+#define db_delete DBDelete
+#define db_rewind DBRewind
+#define db_nextrec DBNextrec
+
+#define DBHANDLE void *
 
 /*
  * Library's private representation of the database.
@@ -939,3 +958,14 @@ char *db_nextrec(DBHANDLE h, char *key)
 	pthread_mutex_unlock(&(db->stMutex));
 	return (ptr);
 }
+
+#undef db_open
+#undef db_clost
+#undef db_fetch
+#undef db_store
+#undef db_delete
+#undef db_rewind
+#undef db_nextrec
+
+#undef DBHANDLE
+

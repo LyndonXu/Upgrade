@@ -13,6 +13,7 @@
 #include <sys/types.h>
 #include <dirent.h>
 #include <netinet/in.h>
+#pragma pack(4)
 
 #ifdef __cplusplus
 extern "C" {
@@ -601,10 +602,10 @@ void LogFileCtrlDestroy(int32_t s32Handle);
  *             : 返回0为正确，否则为错误码，可导致到用函数退出
  * 作者        : 许龙杰
  */
-typedef int32_t (*PFUN_TranversaDir_Callback)(const char *pCurPath, struct dirent *pInfo, void *pContext);
+typedef int32_t (*PFUN_TraversalDir_Callback)(const char *pCurPath, struct dirent *pInfo, void *pContext);
 
 /*
- * 函数名      : TranversaDir
+ * 函数名      : TraversalDir
  * 功能        : 遍历目录
  * 参数        : pPathName [in] (const char * 类型): 要查询的目录
  *             : boIsRecursion [in] (bool类型): 是否递归子目录
@@ -613,8 +614,8 @@ typedef int32_t (*PFUN_TranversaDir_Callback)(const char *pCurPath, struct diren
  * 返回        : 正确返回0, 错误返回错误码
  * 作者        : 许龙杰
  */
-int32_t TranversaDir(const char *pPathName, bool boIsRecursion,
-		PFUN_TranversaDir_Callback pFunCallback, void *pContext);
+int32_t TraversalDir(const char *pPathName, bool boIsRecursion,
+		PFUN_TraversalDir_Callback pFunCallback, void *pContext);
 
 
 /*
@@ -650,8 +651,6 @@ typedef struct _tagStCloudDomain
 	int32_t s32Port;					/* 端口 */
 }StCloudDomain;							/* 通讯信息 */
 
-typedef void *DBHANDLE;
-
 #define XXTEA_KEYCNT			(128)
 #define XXTEA_KEY_CNT_CHAR		(XXTEA_KEYCNT / sizeof(char))
 
@@ -660,28 +659,6 @@ typedef void *DBHANDLE;
 
 #define IPV4_ADDR_LENGTH		(16)
 #endif
-/*
- * Flags for db_store().
- */
-#define DB_INSERT	   1	/* insert new record only */
-#define DB_REPLACE	   2	/* replace existing record */
-#define DB_STORE	   3	/* replace or insert */
-
-/*
- * Implementation limits.
- */
-#define IDXLEN_MIN	   6	/* key, sep, start, sep, length, \n */
-#define IDXLEN_MAX	1024	/* arbitrary */
-#define DATLEN_MIN	   2	/* data byte, newline */
-#define DATLEN_MAX	1024	/* arbitrary */
-
-DBHANDLE db_open(const char *pathname, int32_t oflag, ...);
-void db_close(DBHANDLE h);
-char *db_fetch(DBHANDLE h, const char *key);
-int32_t db_store(DBHANDLE h, const char *key, const char *data, int32_t flag);
-int32_t db_delete(DBHANDLE h, const char *key);
-void db_rewind(DBHANDLE h);
-char *db_nextrec(DBHANDLE h, char *key);
 
 /*
  * 函数名      : CloudTombDestroy
@@ -869,6 +846,93 @@ int32_t CloudAuthentication(StCloudDomain *pStat, bool boIsCoordination,
  */
 int32_t CloudKeepAlive(StCloudDomain *pStat, const char c8ID[PRODUCT_ID_CNT]);
 
+#define CMD_CNT			8
+#define TIMEOUT_CNT		6
+
+typedef struct _tagStUDPInfo
+{
+	uint16_t u16QueueNum;				/* 该条信息的序号 */
+	uint64_t u64SendTime;				/* 本地发送时间 */
+	uint64_t u64ReceivedTime;			/* 本地接收到恢复的时间 */
+	uint64_t u64ServerTime;				/* 服务器的回复时间 */
+	struct _tagStUDPInfo *pPrev;		/* 链表上一个 */
+	struct _tagStUDPInfo *pNext;		/* 链表下一个 */
+}StUDPInfo;
+
+typedef struct _tagStUDPKeepalive
+{
+
+	uint16_t u16OldestSendNum;			/* 最旧的发送序号 */
+	uint16_t u16LatestSendNum;			/* 最新的发送序号 */
+	uint16_t u16SendCnt;				/* 缓冲中存放信息包的数量, 最大为CMD_CNT */
+
+	uint16_t u16LatestReceivedNum;		/* 最新的接收到的恢复包的序号 */
+
+	StUDPInfo stUDPInfo[CMD_CNT];		/* 信息包数组 */
+	StUDPInfo *pCur;					/* 当前可使用的信息包 */
+	StUDPInfo *pOldest;					/* 当前最旧的信息包 */
+}StUDPKeepalive;
+
+/*
+ * 函数名      : UDPKAInit
+ * 功能        : UDP保活超时结构体初始化, 与UDPKADestroy成对使用
+ * 参数        : 无
+ * 返回        : StUDPKeepalive *类型, 错误返回指针NULL, 其余正确
+ * 作者        : 许龙杰
+ */
+StUDPKeepalive *UDPKAInit(void);
+
+/*
+ * 函数名      : UDPKAAddASendTime
+ * 功能        : 当发送一个心跳包后, 将报序号和发送的时间记录
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ *             : u16SendNum [in] (uint16_t) 包序号
+ *             : u64SendTime[in] (uint64_t) 发送的时间
+ * 返回        : int32_t类型, 正确返回0, 否则返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t UDPKAAddASendTime(StUDPKeepalive *pUDP, uint16_t u16SendNum,
+	uint64_t u64SendTime);
+/*
+ * 函数名      : UDPKAAddAReceivedTime
+ * 功能        : 当受到一个心跳包后, 将报序号, 接收的时间和服务器发送记录时的时间记录
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ *             : Received [in] (uint16_t) 包序号
+ *             : u64SendTime[in] (uint64_t) 接收的时间
+ *             : u64ServerTime[in] (uint64_t) 服务器发送记录时的时间
+ * 返回        : int32_t类型, 正确返回0, 否则返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t UDPKAAddAReceivedTime(StUDPKeepalive *pUDP, uint16_t u16ReceivedNum,
+	uint64_t u64ReceivedTime, uint64_t u64ServerTime);
+
+/*
+ * 函数名      : UDPKAAddAReceivedTime
+ * 功能        : 判断当前记录的数据中, UDP保活是否已经超时
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ * 返回        : bool类型, 超时返回true, 否则返回false
+ * 作者        : 许龙杰
+ */
+bool UPDKAIsTimeOut(StUDPKeepalive *pUDP);
+
+/*
+ * 函数名      : UDPKAReset
+ * 功能        : 将记录数据复位
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ * 返回        : 无
+ * 作者        : 许龙杰
+ */
+void UDPKAReset(StUDPKeepalive *pUDP);
+
+/*
+ * 函数名      : UDPKADestroy
+ * 功能        : 销毁资源, 与UDPKAInit成对使用
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ * 返回        : 无
+ * 作者        : 许龙杰
+ */
+void UDPKADestroy(StUDPKeepalive *pUDP);
+
 typedef struct _tagStIPV4Addr
 {
 	char c8Name[16];				/* 用于保存网卡的名字 */
@@ -904,31 +968,107 @@ int32_t GetHostIPV4Addr(const char *pHost, char c8IPV4Addr[IPV4_ADDR_LENGTH], st
  */
 uint64_t TimeGetTime(void);
 
-
-typedef void *DBHANDLE;
 /*
- * Flags for db_store().
+ * DBStore的旗帜定义
  */
-#define DB_INSERT	   1	/* insert new record only */
-#define DB_REPLACE	   2	/* replace existing record */
-#define DB_STORE	   3	/* replace or insert */
+#define DB_INSERT	   1	/* 插入一条新的记录 */
+#define DB_REPLACE	   2	/* 替换一条已经存在的记录 */
+#define DB_STORE	   3	/* 替换或者插入一条记录 */
 
 /*
- * Implementation limits.
+ * 函数名      : DBOpen
+ * 功能        : 打开一个数据库, 和DBClose成对使用, 参数详情, 详见posix的open函数
+ * 参数        : pPathName [in] (const char *)名字
+ *             : s32Flag [in] (int32_t)标志
+ *             : ...可变参数
+ * 返回值      : 成功返回指针句柄, 否则返回NULL指针
+ * 作者        : 许龙杰
  */
-#define IDXLEN_MIN	   6	/* key, sep, start, sep, length, \n */
-#define IDXLEN_MAX	1024	/* arbitrary */
-#define DATLEN_MIN	   2	/* data byte, newline */
-#define DATLEN_MAX	1024	/* arbitrary */
+void *DBOpen(const char *pPathName, int32_t s32Flag, ...);
 
-DBHANDLE db_open(const char *pathname, int32_t oflag, ...);
-void db_close(DBHANDLE h);
-char *db_fetch(DBHANDLE h, const char *key);
-int32_t db_store(DBHANDLE h, const char *key, const char *data, int32_t flag);
-int32_t db_delete(DBHANDLE h, const char *key);
-void db_rewind(DBHANDLE h);
-char *db_nextrec(DBHANDLE h, char *key);
 
+/*
+ * 函数名      : DBClose
+ * 功能        : 关闭一个打开的数据库, 和DBOpen成对使用
+ * 参数        : pHandle [in] (void *)DBOpen的返回值
+ * 返回值      : 无
+ * 作者        : 许龙杰
+ */
+void DBClose(void *pHandle);
+
+/*
+ * 函数名      : DBFetch
+ * 功能        : 查找一个关键值的内容
+ * 参数        : pHandle [in] (void *)DBOpen的返回值
+ *             : pKey [in] (const char *)关键值
+ * 返回值      : 成功返回指向内容的指针, 否则返回NULL指针
+ *               该指针一定不可以使用free释放
+ * 作者        : 许龙杰
+ */
+char *DBFetch(void *pHandle, const char *pKey);
+
+/*
+ * 函数名      : DBStore
+ * 功能        : 存储一条内容
+ * 参数        : pHandle [in] (void *) DBOpen的返回值
+ *             : pKey [in] (const char *) 关键值
+ *             : pData [in] (const char *) 内容
+ *             : s32Flag [in] (int32_t) 详见DBStore的旗帜定义
+ * 返回值      : 成功返回0, 否则表示参数错误或者存储失败
+ * 作者        : 许龙杰
+ */
+int32_t DBStore(void *pHandle, const char *pKey, const char *pData, int32_t s32Flag);
+
+/*
+ * 函数名      : DBDelete
+ * 功能        : 根据关键删除一条记录
+ * 参数        : pHandle [in] (void *)DBOpen的返回值
+ *             : pKey [in] (const char *)关键值
+ * 返回值      : 成功返回0, 否则表示参数错误或者删除失败
+ * 作者        : 许龙杰
+ */
+int32_t DBDelete(void *pHandle, const char *pKey);
+
+
+/*
+ * 函数名      : DBRewind
+ * 功能        : 重绕索引文件, 必须在第一次调用DBNextrec之前被调用
+ * 参数        : pHandle [in] (void *)DBOpen的返回值
+ * 返回值      : 无
+ * 作者        : 许龙杰
+ */
+void DBRewind(void *pHandle);
+
+/*
+ * 函数名      : DBNextrec
+ * 功能        : 返回下一个连续的记录
+ * 参数        : pHandle [in] (void *)DBOpen的返回值
+ *             : pKey [in] (const char *)关键值
+ * 返回值      : 成功返回指向内容的指针, 否则返回NULL指针
+ *               该指针一定不可以使用free释放
+ * 作者        : 许龙杰
+ */
+char *DBNextrec(void *pHandle, char *pKey);
+
+/*
+ * 函数名      : CRC32Buf
+ * 功能        : 计算一段缓存的CRC32值
+ * 参数        : pBuf [in] (uint8_t *)缓存指针
+ *             : u32Length [in] (uint32_t)缓存的大小
+ * 返回值      : uint32_t 类型, 表示CRC32值
+ * 作者        : 许龙杰
+ */
+uint32_t CRC32Buf(uint8_t *pBuf, uint32_t u32Length);
+
+/*
+ * 函数名      : CRC32Buf
+ * 功能        : 计算一个文件的CRC32值
+ * 参数        : pName [in] (const char *)文件的名字
+ *             : pCRC32 [in/out] (uint32_t *)成功在指针指向的内容中保存CRC32值
+ * 返回值      : int32_t 类型成功返回0, 否则返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t CRC32File(const char *pName, uint32_t *pCRC32);
 
 
 #ifdef __cplusplus

@@ -11,17 +11,391 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
+
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "upgrade.h"
 
 #if 1
+int main(int argc, char *argv[])
+{
+	struct stat stStat;
+	if (argc != 2)
+	{
+		printf("usage: %s file name\n", argv[0]);
+		return -1;
+	}
+
+	if( stat(argv[1], &stStat) != 0)
+	{
+		printf("stat error: %s\n", strerror(errno));
+	}
+	else
+	{
+		printf("stat ok\n");
+	}
+
+	return 0;
+}
+#endif
+#if 0
 int main()
 {
+	int32_t UpdateFileCopyToRun();
+	UpdateFileCopyToRun();
+	return 0;
+}
+
+#endif
+
+#if 0
+
+int main(int argc, char *argv[])
+{
+	uint32_t u32CRC32 = 0;
+	if (argc != 2)
+	{
+		printf("usage: %s file name", argv[0]);
+		return -1;
+	}
+
+	CRC32File(argv[1], &u32CRC32);
+
+	printf("the CRC32 of file(%s) is: 0x%08X\n", argv[1], u32CRC32);
+
+	return 0;
+}
+#endif
+
+#if 0
+
+int main()
+{
+	FILE *pFile = fopen("CRC32_table", "wb+");
+	int32_t i, j;
+	uint32_t u32CRC32;
+	fprintf(pFile, "static uint32_t s_u32CRC32Table[] = {\n");
+
+	for (i = 0; i < 256; i++)
+	{
+		u32CRC32 = i;
+		for (j = 0; j < 8; j++)
+		{
+			if ((u32CRC32 & 0x01) != 0)
+			{
+				u32CRC32 = (u32CRC32 >> 1) ^ 0xEDB88320;
+			}
+			else
+			{
+				u32CRC32 >>= 1;
+			}
+		}
+		if ((i & 0x07) == 0)
+		{
+			fprintf(pFile, "\t");
+		}
+		fprintf(pFile, "0x%08X, ", u32CRC32);
+		if ((i & 0x07) == 0x07)
+		{
+			fprintf(pFile, "\n");
+		}
+	}
+
+	fprintf(pFile, "};\n");
+	fclose(pFile);
+	return 0;
+}
+
+
+#endif
+
+
+#if 0
+
+#ifndef PRINT
+#define PRINT(x, ...) printf("[%s:%d]: "x, __FILE__, __LINE__, ##__VA_ARGS__)
+#endif
+
+#define CLOUD_KEEPALIVE_TIME		30
+#define UDP_MSG_HEAD_NAME			"ANGW"
+#define UDP_MSG_HEAD_NAME_LENGTH	4
+
+static uint32_t s_u32KeepAliveTime = 0;
+static uint32_t s_u32SysTime = 0;
+
+static bool s_boIsCloudOnline = true;
+
+const char c_c8Domain[] = "www.jiuan.com:8000";
+
+
+
+typedef struct _tagStUDPMsgHead
+{
+	char c8HeadName[UDP_MSG_HEAD_NAME_LENGTH];
+	char c8Var[3];
+	char c8Reserved;
+	uint64_t u64TimeStamp;
+	uint16_t u16Cmd;
+	uint16_t u16CmdLength;
+}StUDPMsgHead;
+typedef struct _tagStUDPHeartBeat
+{
+	StUDPMsgHead stHead;
+	uint16_t u16QueueNum;
+	char c8SN[16];
+}StUDPHeartBeat;
+typedef union _tagUnUDPMsg
+{
+	char buf[64];
+	struct
+	{
+		StUDPMsgHead stHead;
+		void *pData;
+	};
+	StUDPHeartBeat stHeartBeat;
+}UnUDPMsg;
+
+int main()
+{
+	StCloudDomain stStat = {{_Cloud_IsOnline, "192.169.1.1"}};
+	//char c8Domain[64];
+	int32_t s32Socket = -1;
+
+	UnUDPMsg unUDPMsg;
+	uint16_t u16QueueNum = 0;
+
+	StUDPKeepalive *pUDPKA = UDPKAInit();
+
+	if (pUDPKA == NULL)
+	{
+		//PrintLog("error memory\n");
+		PRINT("error memory\n");
+		goto end;
+	}
+	s32Socket = socket(AF_INET, SOCK_DGRAM, 0);
+	if (s32Socket < 0)
+	{
+		//PrintLog("socket error: %s\n", strerror(errno));
+		PRINT("socket error: %s\n", strerror(errno));
+		goto end;
+	}
+	/*
+	 * why we don't bind the socket to the local IP address?
+	 * because we don't know whether the gateway has passed the authentication
+	 */
+
+	while (1)
+	{
+		s_u32SysTime = time(NULL);
+		if (s_boIsCloudOnline)
+		{
+			fd_set stSet;
+			struct timeval stTimeout;
+
+			stTimeout.tv_sec = 1;
+			stTimeout.tv_usec = 0;
+			FD_ZERO(&stSet);
+			FD_SET(s32Socket, &stSet);
+
+			if (select(s32Socket + 1, &stSet, NULL, NULL, &stTimeout) <= 0)
+			{
+				goto next;
+			}
+			else if (FD_ISSET(s32Socket, &stSet))
+			{
+				/* we need read some info from the server */
+				struct sockaddr_in stRecvAddr = {0};
+				int32_t s32RecvLen = 0;
+				{
+				/* I don't think we should check the return value */
+				socklen_t s32Len = 0;
+				s32RecvLen = recvfrom(s32Socket, &unUDPMsg, sizeof(UnUDPMsg), 0, (struct sockaddr *)(&stRecvAddr), &s32Len);
+				if (s32RecvLen <= 0 || (s32Len != sizeof (struct sockaddr_in)))
+				{
+					goto next;
+				}
+				}
+#if 0
+				/* compare stRecvAddr with stServerAddr to check whether the message is mine */
+				/* get the domain and port from the database */
+				if (CloudGetDomainFromRegion(s_s32CloudHandle, _Region_UDP,
+						s_c8GatewayRegion , c8Domain, sizeof(c8Domain)) != 0)
+				{
+					goto next;
+				}
+#endif
+				/* translate the string */
+				GetDomainPortFromString(c_c8Domain, stStat.c8Domain, 64, &(stStat.s32Port));
+				{
+				struct sockaddr_in stServerAddr = {0};
+				stServerAddr.sin_family = AF_INET;
+				stServerAddr.sin_port = htons(stStat.s32Port);
+				/* get the IPV4 address of host via DNS(in this application, the host just has one IP address)  */
+				if (GetHostIPV4Addr(stStat.c8Domain, NULL, &(stServerAddr.sin_addr)) != 0)
+				{
+					goto next;
+				}
+				else if(memcmp(&stServerAddr, &stRecvAddr, sizeof(struct sockaddr)) == 0)
+				{
+					/* well, now, I get a right message */
+					if(memcmp(unUDPMsg.stHead.c8HeadName, UDP_MSG_HEAD_NAME, UDP_MSG_HEAD_NAME_LENGTH) != 0)
+					{
+						goto next;	/* it's not my message */
+					}
+					switch (unUDPMsg.stHead.u16Cmd)
+					{
+					case 1:		/* heartbeat */
+					{
+						uint64_t u64GetTime = TimeGetTime();
+						UDPKAAddAReceivedTime(pUDPKA, unUDPMsg.stHeartBeat.u16QueueNum,
+								u64GetTime, unUDPMsg.stHead.u64TimeStamp);
+						break;
+					}
+					case 3 ... 4:		/* config message */
+					{
+						break;
+					}
+					default:
+						break;
+					}
+				}
+				}
+			}
+next:
+			if (UPDKAIsTimeOut(pUDPKA))
+			{
+				PRINT("I can't receive message from server for a long time\n");
+				s_boIsCloudOnline = false;
+			}
+			else if ((s_u32SysTime - s_u32KeepAliveTime) > CLOUD_KEEPALIVE_TIME)
+			{
+
+				int32_t s32Err =
+#if 0
+						CloudGetDomainFromRegion(s_s32CloudHandle, _Region_UDP,
+						s_c8GatewayRegion , c8Domain, sizeof(c8Domain));
+				if (s32Err != 0)
+				{
+					continue;
+				}
+#else
+								0;
+#endif
+				GetDomainPortFromString(c_c8Domain, stStat.c8Domain, 64, &(stStat.s32Port));
+				{
+				struct sockaddr_in stServerAddr = {0};
+				stServerAddr.sin_family = AF_INET;
+				stServerAddr.sin_port = htons(stStat.s32Port);
+				s32Err = GetHostIPV4Addr(stStat.c8Domain, NULL, &(stServerAddr.sin_addr));
+				if (s32Err != 0)
+				{
+					continue;
+				}
+				else
+				{
+					/* every time we send, we should check whether the local IP address is changed */
+#if 0
+					s32Err = CloudGetStat(s_s32CloudHandle, &(stStat.stStat));
+					if (s32Err != 0)
+					{
+						continue;
+					}
+					else
+#endif
+					{
+						struct sockaddr stBindAddr = {0};
+						struct sockaddr_in *pTmpAddr = (void *)(&stBindAddr);
+						socklen_t s32Len = sizeof(struct sockaddr);
+						/* get the current address to which the socket socket is bound */
+						s32Err = getsockname(s32Socket, &stBindAddr, &s32Len);
+						if (s32Err != 0)
+						{
+							/* what happened */
+							continue;
+						}
+						else
+						{
+							in_addr_t u32LocalInternetAddr;
+							u32LocalInternetAddr = htonl(INADDR_ANY);
+							if (u32LocalInternetAddr != pTmpAddr->sin_addr.s_addr)
+							{
+								/*
+								 * we find that the address has changed, we should re-bind the socket, but very sorry,
+								 * there is no right system API can finish this directly, so, we close the socket
+								 * and open a new socket, then, bind it
+								 */
+								close(s32Socket);
+								s32Socket = socket(AF_INET, SOCK_DGRAM, 0);
+								if (s32Socket < 0)
+								{
+									PrintLog("socket error: %s\n", strerror(errno));
+									PRINT("socket error: %s\n", strerror(errno));
+									goto end;
+								}
+								pTmpAddr->sin_family = AF_INET;
+								pTmpAddr->sin_port = htons(0);
+								pTmpAddr->sin_addr.s_addr = u32LocalInternetAddr;
+								if (bind(s32Socket, &stBindAddr, sizeof(struct sockaddr)))
+								{
+									PRINT("bind error: %s\n", strerror(errno));
+									PrintLog("bind error: %s\n", strerror(errno));
+									continue;
+								}
+							}
+						}
+					}
+					/* I don't think we should check the return value */
+					memcpy(unUDPMsg.stHead.c8HeadName, UDP_MSG_HEAD_NAME, UDP_MSG_HEAD_NAME_LENGTH);
+					unUDPMsg.stHead.u64TimeStamp = TimeGetTime();
+					unUDPMsg.stHead.u16Cmd = 1;
+					unUDPMsg.stHead.u16CmdLength = sizeof(StUDPHeartBeat) - sizeof(StUDPMsgHead);
+					unUDPMsg.stHeartBeat.u16QueueNum = u16QueueNum;
+					sendto(s32Socket, &unUDPMsg, sizeof(UnUDPMsg), MSG_NOSIGNAL,
+							(struct sockaddr *)(&stServerAddr), sizeof(struct sockaddr));
+					UDPKAAddASendTime(pUDPKA, u16QueueNum++, unUDPMsg.stHead.u64TimeStamp);
+					PRINT("CloudKeepAlive OK\n");
+					s_u32KeepAliveTime = s_u32SysTime;
+				}
+				}
+			}
+		}
+		else
+		{
+			sleep(1);
+			UDPKAReset(pUDPKA);
+		}
+	}
+end:
+	if (s32Socket >= 0)
+	{
+		close(s32Socket);
+	}
+	UDPKADestroy(pUDPKA);
+return 0;
+}
+
+#endif
+
+#if 0
+int main()
+{
+	StUDPKeepalive *pUDP = UDPKAInit();
+	int32_t i = 0;
+
+	for (i = 0; i < 65536; i += 2)
+	{
+		UDPKAAddASendTime(pUDP, i >> 1, i);
+		UDPKAAddAReceivedTime(pUDP, i >> 1, i, i);
+	}
+	UDPKADestroy(pUDP);
+
 	return 0;
 }
 
