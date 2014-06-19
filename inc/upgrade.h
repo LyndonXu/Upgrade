@@ -630,7 +630,7 @@ int32_t TraversalDir(const char *pPathName, bool boIsRecursion,
 int32_t btea(int32_t *v, int32_t n, int32_t *k);
 
 
-#if !LIB_COMPLINE
+#ifndef LIB_COMPLINE
 typedef enum _tagEmCloudStat
 {
 	_Cloud_IsNotOnline = 0,
@@ -652,12 +652,15 @@ typedef struct _tagStCloudDomain
 }StCloudDomain;							/* 通讯信息 */
 
 #define XXTEA_KEYCNT			(128)
-#define XXTEA_KEY_CNT_CHAR		(XXTEA_KEYCNT / sizeof(char))
+#define XXTEA_KEY_CNT_CHAR		(XXTEA_KEYCNT / (sizeof(char) * 8))
 
 #define RAND_NUM_CNT			(16)
 #define PRODUCT_ID_CNT			(16)
 
 #define IPV4_ADDR_LENGTH		(16)
+
+#define AVERAGE_WEIGHT		(12)		/* 一节滤波权重值 */
+
 #endif
 
 /*
@@ -751,6 +754,18 @@ void SSL_Destory(void);
  */
 int32_t CloudSendAndGetReturn(StCloudDomain *pStat, StSendInfo *pSendInfo, StMMap *pMap);
 
+
+/*
+ * 函数名      : CloudSendAndGetReturnNoSSL
+ * 功能        : 向云发送数据并得到返回(不通过SSL)，保存在pMap中
+ * 参数        : pStat [in] (StCloudDomain * 类型): 云状态，详见定义
+ *             : pSendInfo [in] (StSendInfo 类型): 发送信息，详见定义
+ *             : pMap [out] (StMMap *): 保存返回内容，详见定义，使用过之后必须使用CloudMapRelease销毁
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudSendAndGetReturnNoSSL(StCloudDomain *pStat, StSendInfo *pSendInfo, StMMap *pMap);
+
 /*
  * 函数名      : CloudMapRelease
  * 功能        : 销毁CloudSendAndGetReturn的返回内容
@@ -836,6 +851,35 @@ int32_t GetDomainPortFromString(const char *pStr, char *pDomain, uint32_t u32Siz
 int32_t CloudAuthentication(StCloudDomain *pStat, bool boIsCoordination,
 		const char c8ID[PRODUCT_ID_CNT], const char c8Key[XXTEA_KEY_CNT_CHAR]);
 
+
+/*
+ * 函数名      : CloudGetSelfRegion
+ * 功能        : 通过云得到自身的区域
+ * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ *             : pRegion [in/out] (char * 类型): 指向输出buffer, 正确时, 保存区域
+ *             : u32Size [in] (uint32_t): pRegion buffer 的大小
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudGetSelfRegion(StCloudDomain *pStat, char *pRegion, uint32_t u32Size);
+
+typedef struct _tagStRegionMapping
+{
+	char c8Region[16];							/* 区域名 */
+	char c8Cloud[64];							/* 云服务器 */
+	char c8Heartbeat[64];						/* 保活服务器 */
+}StRegionMapping;
+
+/*
+ * 函数名      : CloudGetRegionMapping
+ * 功能        : 通过云得到区域的对应的domain
+ * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ * 			   : p2Mapping [in/out] (StRegionMapping ** 类型): 成功返回申请的数组
+ *             : pCnt [in/out] (uint32_t * 类型): 成功返回*p2Mapping申请的数组的大小
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudGetRegionMapping(StCloudDomain *pStat, StRegionMapping **p2Mapping, uint32_t *pCnt);
 /*
  * 函数名      : CloudKeepAlive
  * 功能        : 云保活
@@ -905,6 +949,25 @@ int32_t UDPKAAddASendTime(StUDPKeepalive *pUDP, uint16_t u16SendNum,
  */
 int32_t UDPKAAddAReceivedTime(StUDPKeepalive *pUDP, uint16_t u16ReceivedNum,
 	uint64_t u64ReceivedTime, uint64_t u64ServerTime);
+
+/*
+ * 函数名      : UDPKAGetTimeDiff
+ * 功能        : 得到本地时间与服务器之间的时间差
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ *             : pTimeDiff [in/out] (int64_t *) 用于保存时间差
+ * 返回        : int32_t类型, 正确返回0, 否则返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t UDPKAGetTimeDiff(StUDPKeepalive *pUDP, int64_t *pTimeDiff);
+
+/*
+ * 函数名      : UDPKAClearTimeDiff
+ * 功能        : 清除时间差统计结果
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ * 返回        : int32_t类型, 正确返回0, 否则返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t UDPKAClearTimeDiff(StUDPKeepalive *pUDP);
 
 /*
  * 函数名      : UDPKAAddAReceivedTime

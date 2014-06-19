@@ -381,6 +381,7 @@ int32_t CloudSendAndGetReturn(StCloudDomain *pStat, StSendInfo *pSendInfo, StMMa
 		sprintf(c8Domain, "%s.", pSendInfo->pSecondDomain);
 	}
 	strcat(c8Domain, pStat->c8Domain);
+	PRINT("server domain: %s\n", c8Domain);
 
 	bzero(&stServerAddr, sizeof(stServerAddr));
 	stServerAddr.sin_family = AF_INET;
@@ -504,6 +505,7 @@ int32_t CloudSendAndGetReturn(StCloudDomain *pStat, StSendInfo *pSendInfo, StMMa
 	s32SSL = SSL_set_fd(pSSL, s32Socket);
 	if (s32SSL == 0)
 	{
+		ERR_print_errors_fp(stderr);
 		s32Err = SSL_get_error(pSSL, s32SSL);
 		PRINT("SSL_set_fd error %d\n", s32Err);
 		s32Err = MY_ERR(_Err_SSL + s32Err);
@@ -521,7 +523,8 @@ int32_t CloudSendAndGetReturn(StCloudDomain *pStat, StSendInfo *pSendInfo, StMMa
 	if (s32SSL != 1)
 	{
 		s32Err = SSL_get_error(pSSL, s32SSL);
-		PRINT("SSL_set_fd error %d\n", s32Err);
+		ERR_print_errors_fp(stderr);
+		PRINT("SSL_connect error %d\n", s32Err);
 		s32Err = MY_ERR(_Err_SSL + s32Err);
 		goto err2;
 	}
@@ -529,6 +532,10 @@ int32_t CloudSendAndGetReturn(StCloudDomain *pStat, StSendInfo *pSendInfo, StMMa
 	{
 	char c8Request[1024];
 	c8Request[0] = 0;
+	if (pSendInfo->s32BodySize == -1)
+	{
+		pSendInfo->s32BodySize = strlen(pSendInfo->pSendBody);
+	}
 	sprintf(c8Request,
 			"%s /%s HTTP/1.1\r\n"
 			"Accept: */*\r\n"
@@ -540,7 +547,7 @@ int32_t CloudSendAndGetReturn(StCloudDomain *pStat, StSendInfo *pSendInfo, StMMa
 			pSendInfo->boIsGet ? "GET" : "POST",
 			pSendInfo->pFile, c8Domain, pStat->s32Port,
 			pSendInfo->s32BodySize);
-	PRINT("%s", c8Request);
+	PRINT("\n%s\n", c8Request);
 	/* send */
 	{
 	int32_t s32Totalsend = 0;
@@ -691,6 +698,291 @@ err:
 	return 0;
 }
 
+
+/*
+ * 函数名      : CloudSendAndGetReturnNoSSL
+ * 功能        : 向云发送数据并得到返回(不通过SSL)，保存在pMap中
+ * 参数        : pStat [in] (StCloudDomain * 类型): 云状态，详见定义
+ *             : pSendInfo [in] (StSendInfo 类型): 发送信息，详见定义
+ *             : pMap [out] (StMMap *): 保存返回内容，详见定义，使用过之后必须使用CloudMapRelease销毁
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudSendAndGetReturnNoSSL(StCloudDomain *pStat, StSendInfo *pSendInfo, StMMap *pMap)
+{
+	if ((pStat == NULL) || (pSendInfo == NULL) || (pMap == NULL))
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+
+	if (pStat->stStat.emStat != _Cloud_IsOnline)
+	{
+		return MY_ERR(_Err_Cloud_IsNotOnline);
+	}
+
+	{
+	int32_t s32Err = 0;
+	int32_t s32Socket = -1;
+	struct sockaddr_in stServerAddr, stClientAddr;
+
+	char c8Domain[64];
+	c8Domain[0] = 0;
+	if (pSendInfo->pSecondDomain != NULL)
+	{
+		sprintf(c8Domain, "%s.", pSendInfo->pSecondDomain);
+	}
+	strcat(c8Domain, pStat->c8Domain);
+	PRINT("server domain: %s\n", c8Domain);
+
+	bzero(&stServerAddr, sizeof(stServerAddr));
+	stServerAddr.sin_family = AF_INET;
+	s32Err = GetHostIPV4Addr(c8Domain, NULL, &(stServerAddr.sin_addr));
+	if (s32Err != 0)
+	{
+		/* get the IP address of the server */
+		PRINT("GetHostIPV4Addr error\n");
+		return s32Err;
+	}
+	stServerAddr.sin_port = htons(pStat->s32Port);	/* https */
+
+	bzero(&stClientAddr, sizeof(stClientAddr));
+	stClientAddr.sin_family = AF_INET;    /* Internet protocol */
+	if (inet_aton(pStat->stStat.c8ClientIPV4, &stClientAddr.sin_addr) == 0)
+	{
+		PRINT("client IP address error!\n");
+		return MY_ERR(_Err_SYS + errno);
+	}
+	stClientAddr.sin_port = htons(0);    /* the system will allocate a port number for it */
+
+	if ((s32Socket = socket(AF_INET, SOCK_STREAM, 0)) == -1)
+	{
+		PRINT("socket error:%s\n", strerror(errno));
+		return MY_ERR(_Err_SYS + errno);
+	}
+
+	if (bind(s32Socket, (struct sockaddr*) &stClientAddr, sizeof(struct sockaddr_in)) != 0)
+	{
+		PRINT("bind error:%s\n", strerror(errno));
+		s32Err = MY_ERR(_Err_SYS + errno);
+		goto err;
+	}
+
+	{
+		int32_t s32Mode;
+
+		/*First we make the socket nonblocking*/
+		s32Mode = fcntl(s32Socket,F_GETFL,0);
+		s32Mode |= O_NONBLOCK;
+		if (fcntl(s32Socket, F_SETFL, s32Mode) == -1)
+		{
+			PRINT("bind error:%s\n", strerror(errno));
+			s32Err = MY_ERR(_Err_SYS + errno);
+			goto err;
+		}
+	}
+
+	PRINT("begin connect\n");
+	if (connect(s32Socket, (struct sockaddr *) (&stServerAddr), sizeof(struct sockaddr_in)) == -1)
+	{
+		if (errno != EINPROGRESS)
+		{
+			PRINT("connect error:%s\n", strerror(errno));
+			s32Err = MY_ERR(_Err_SYS + errno);
+			goto err;
+		}
+		else
+		{
+			struct timeval stTimeVal;
+			fd_set stFdSet;
+			stTimeVal.tv_sec = 10;
+			stTimeVal.tv_usec = 0;
+			FD_ZERO(&stFdSet);
+			FD_SET(s32Socket, &stFdSet);
+			s32Err = select(s32Socket + 1, NULL, &stFdSet, NULL, &stTimeVal);
+			if (s32Err > 0)
+			{
+				socklen_t u32Len = sizeof(int32_t);
+				/* for firewall */
+				getsockopt(s32Socket, SOL_SOCKET, SO_ERROR, &s32Err, &u32Len);
+				if (s32Err != 0)
+				{
+					PRINT("connect error:%s\n", strerror(errno));
+					s32Err = MY_ERR(_Err_SYS + errno);
+					goto err;
+				}
+				PRINT("connect ok via select\n");
+			}
+			else
+			{
+				PRINT("connect error:%s\n", strerror(errno));
+				s32Err = MY_ERR(_Err_SYS + errno);
+				goto err;
+			}
+		}
+	}
+	PRINT("connect ok\n");
+	{
+	int32_t s32Mode;
+
+	/*First we make the socket nonblocking*/
+	s32Mode = fcntl(s32Socket,F_GETFL,0);
+	s32Mode &= (~O_NONBLOCK);
+	if (fcntl(s32Socket, F_SETFL, s32Mode) == -1)
+	{
+		PRINT("bind error:%s\n", strerror(errno));
+		s32Err = MY_ERR(_Err_SYS + errno);
+		goto err;
+	}
+	}
+	/* 设置套接字选项,接收和发送超时时间 */
+	{
+	struct timeval stTimeout = {30};
+	if(setsockopt(s32Socket, SOL_SOCKET, SO_RCVTIMEO, &stTimeout, sizeof(struct timeval)) < 0)
+	{
+		close(s32Socket);
+		return MY_ERR(_Err_SYS + errno);
+	}
+
+	if(setsockopt(s32Socket, SOL_SOCKET, SO_SNDTIMEO, &stTimeout, sizeof(struct timeval)) < 0)
+	{
+		close(s32Socket);
+		return MY_ERR(_Err_SYS + errno);
+	}
+	}
+
+
+
+	{
+	char c8Request[1024];
+	c8Request[0] = 0;
+	sprintf(c8Request,
+			"%s /%s HTTP/1.1\r\n"
+			"Accept: */*\r\n"
+			/* "Accept-Language: zh-cn\r\n"
+			"User-Agent: Mozilla/4.0 (compatible; MSIE 5.01; Windows NT 5.0)\r\n" maybe not useful */
+			"Host: %s:%d\r\n"
+			"Content-Length: %d\r\n"
+			"Connection: Close\r\n\r\n",
+			pSendInfo->boIsGet ? "GET" : "POST",
+			pSendInfo->pFile, c8Domain, pStat->s32Port,
+			pSendInfo->s32BodySize);
+	PRINT("%s", c8Request);
+	/* send */
+	{
+	int32_t s32Totalsend = 0;
+	int32_t s32Size = strlen(c8Request);
+	while (s32Totalsend < s32Size)
+	{
+		int32_t s32Send = send(s32Socket, c8Request + s32Totalsend, s32Size - s32Totalsend, MSG_NOSIGNAL);
+		if (s32Send < 0)
+		{
+			PRINT("send error %s\n", strerror(errno));
+			s32Err = MY_ERR(_Err_SYS + errno);
+			goto err;
+		}
+		s32Totalsend += s32Send;
+	}
+	if (pSendInfo->pSendBody != NULL)
+	{
+		const char *pBody = pSendInfo->pSendBody;
+		s32Size = pSendInfo->s32BodySize;
+		if(s32Size < 0)
+		{
+			s32Size = strlen(pSendInfo->pSendBody);
+		}
+		s32Totalsend = 0;
+		while (s32Totalsend < s32Size)
+		{
+			int32_t s32Send = send(s32Socket, pBody + s32Totalsend, s32Size - s32Totalsend, MSG_NOSIGNAL);
+			if (s32Send <= 0)
+			{
+				PRINT("send error %s\n", strerror(errno));
+				s32Err = MY_ERR(_Err_SYS + errno);
+				goto err;
+			}
+			s32Totalsend += s32Send;
+		}
+	}
+	}
+	/* receive */
+	{
+	FILE *pFile = tmpfile();
+	int32_t s32Fd = fileno(pFile);
+	int32_t s32RecvTotal = 0;
+	void *pMapAddr = NULL;
+	if (pFile == NULL)
+	{
+		PRINT("fopen error:%s\n", strerror(errno));
+		s32Err = MY_ERR(_Err_SYS + errno);
+		goto err;
+	}
+	while(1)
+	{
+		int32_t s32RecvTmp = 0, s32Recv = 0;
+		bool boIsFinished = false;
+		s32Err = ftruncate(s32Fd, s32RecvTotal + PAGE_SIZE);
+		if (s32Err != 0)
+		{
+			s32Err = MY_ERR(_Err_SYS + errno);
+			goto err4;
+		}
+		if (pMapAddr != NULL)
+		{
+			munmap(pMapAddr, PAGE_SIZE);
+		}
+		pMapAddr = mmap(0, PAGE_SIZE, PROT_READ | PROT_WRITE, MAP_SHARED, s32Fd, s32RecvTotal);
+		if (pMapAddr == NULL)
+		{
+			s32Err = MY_ERR(_Err_SYS + errno);
+			goto err4;
+		}
+		PRINT("mmap ok, begin to read\n");
+		while (s32Recv < PAGE_SIZE)
+		{
+			s32RecvTmp = recv(s32Socket, (void *)((uint32_t)pMapAddr + s32Recv), PAGE_SIZE - s32Recv, 0);
+			if (s32RecvTmp <= 0)
+			{
+				boIsFinished = true;
+				break;
+			}
+			s32Recv += s32RecvTmp;
+		}
+		s32RecvTotal += s32Recv;
+		PRINT("read ok, total receive is %d\n", s32RecvTotal);
+		if (boIsFinished)
+		{
+			break;
+		}
+	}
+	pMap->pFile = pFile;
+	if (pMapAddr != NULL)
+	{
+		munmap(pMapAddr, PAGE_SIZE);
+	}
+	pMapAddr = mmap(0, s32RecvTotal, PROT_READ | PROT_WRITE, MAP_SHARED, s32Fd, 0);
+	if (pMapAddr == NULL)
+	{
+		s32Err = MY_ERR(_Err_SYS + errno);
+		goto err4;
+	}
+	pMap->pMap = pMapAddr;
+	pMap->u32MapSize = s32RecvTotal;
+	goto err;
+err4:
+	if (pMapAddr != NULL)
+	{
+		munmap(pMapAddr, PAGE_SIZE);
+	}
+
+	fclose(pFile);
+	}
+	}
+
+err:
+	close(s32Socket);
+	return s32Err;
+	}
+}
 /*
  * 函数名      : CloudMapRelease
  * 功能        : 销毁CloudSendAndGetReturn的返回内容
@@ -817,6 +1109,7 @@ int32_t GetHttpReturnCode(StMMap *pMap)
 			{
 				sscanf(pTmp + 1, "%d", &s32ReturnCode);
 			}
+			PRINT("HTTP return: %d\n", s32ReturnCode);
 			return s32ReturnCode;
 		}
 	}
@@ -847,6 +1140,7 @@ json_object *GetHttpJsonBody(StMMap *pMap, int32_t *pErr)
 	json_object *pReturn = NULL, *pSon;
 	int32_t s32Err;
 	const char *pBody;
+	PRINT("server return: \n%s\n", (const char *)pMap->pMap);
 	/* analysis the return text */
 	s32Err = GetHttpReturnCode(pMap);
 	if (s32Err != 200)
@@ -858,12 +1152,14 @@ json_object *GetHttpJsonBody(StMMap *pMap, int32_t *pErr)
 	if (pBody == NULL)
 	{
 		s32Err =MY_ERR(_Err_Cloud_Body);
+		PRINT("cannot find char \'{\'\n");
 		goto end;
 	}
 	pReturn = json_tokener_parse(pBody);
 	if (pReturn == NULL)
 	{
 		s32Err = MY_ERR(_Err_Cloud_JSON);
+		PRINT("json_tokener_parse error\n");
 		goto end;
 	}
 	pSon = json_object_object_get(pReturn, "Result");
@@ -871,6 +1167,7 @@ json_object *GetHttpJsonBody(StMMap *pMap, int32_t *pErr)
 	{
 		s32Err = MY_ERR(_Err_Cloud_JSON);
 		json_object_put(pReturn);
+		PRINT("json cannot get key Result\n");
 		pReturn = NULL;
 		goto end;
 	}
@@ -880,7 +1177,7 @@ json_object *GetHttpJsonBody(StMMap *pMap, int32_t *pErr)
 		s32Err = json_object_get_int(pSon);
 		if (s32Err != 1)
 		{
-			pSon = json_object_object_get(pSon, "ResultMessage");
+			pSon = json_object_object_get(pReturn, "ResultMessage");
 			PRINT("ResultMessage: %s\n", json_object_to_json_string(pSon));
 			s32Err = MY_ERR(_Err_Cloud_Result + s32Err);
 			json_object_put(pReturn);
@@ -890,6 +1187,8 @@ json_object *GetHttpJsonBody(StMMap *pMap, int32_t *pErr)
 	}
 	else
 	{
+		PRINT("key Result's type is not int\n");
+
 		s32Err = MY_ERR(_Err_Cloud_JSON);
 		json_object_put(pReturn);
 		pReturn = NULL;
@@ -927,6 +1226,7 @@ int32_t ResolveCmd_0xF5(json_object *pJsonObj)
 	sprintf(c8Buf, "%s", json_object_get_string(pJsonObj));
 	sscanf(c8Buf, "%02hhX", &c8Tmp);
 	s32Rslt = c8Tmp;
+	PRINT("F5 return %s\n", c8Buf);
 	return (s32Rslt & 0xFF);
 }
 
@@ -946,12 +1246,13 @@ int32_t ResolveCmd_0xFA(json_object *pJsonObj, char c8R[RAND_NUM_CNT])
 
 	{
 	int32_t i;
-	const uint16_t *pBuf = (const uint16_t *)json_object_to_json_string(pJsonObj);
+	char c8RServer[36];
 	char c8Buf[4] = {0};
-	uint16_t *pTmp = (uint16_t *)c8Buf;
+	snprintf(c8RServer, 36,"%s", json_object_to_json_string(pJsonObj));
 	for (i = 0; i < RAND_NUM_CNT; i++)
 	{
-		*pTmp = pBuf[i];
+		c8Buf[0] = c8RServer[i * 2 + 1];		/* \" */
+		c8Buf[1] = c8RServer[i * 2 + 2];
 		sscanf(c8Buf, "%02hhX", c8R + i);
 	}
 	}
@@ -961,8 +1262,6 @@ int32_t ResolveCmd_0xFA(json_object *pJsonObj, char c8R[RAND_NUM_CNT])
 /* resolve the command of 0xFB from the cloud, the c8ClientR is R1 of client */
 int32_t ResolveCmd_0xFB(json_object *pJsonObj, char c8ClientR[RAND_NUM_CNT], const char c8Key[XXTEA_KEY_CNT_CHAR])
 {
-	btea((int32_t *)c8ClientR, RAND_NUM_CNT / sizeof(int32_t), (int32_t *)c8Key);
-
 	/* command data */
 	{
 	int32_t s32Len;
@@ -976,13 +1275,17 @@ int32_t ResolveCmd_0xFB(json_object *pJsonObj, char c8ClientR[RAND_NUM_CNT], con
 
 	{
 	int32_t i;
-	const uint16_t *pBuf = (const uint16_t *)json_object_to_json_string(pJsonObj);
+	char c8RServer[36];
 	char c8Buf[4] = {0};
-	uint16_t *pTmp = (uint16_t *)c8Buf;
+	snprintf(c8RServer, 36,"%s", json_object_to_json_string(pJsonObj));
+
+	btea((int32_t *)c8ClientR, RAND_NUM_CNT / sizeof(int32_t), (int32_t *)c8Key);
+
 	for (i = 0; i < RAND_NUM_CNT; i++)
 	{
 		char c8R = 0;
-		*pTmp = pBuf[i];
+		c8Buf[0] = c8RServer[i * 2 + 1];		/* \" */
+		c8Buf[1] = c8RServer[i * 2 + 2];
 		sscanf(c8Buf, "%02hhX", &c8R);
 		if (c8R != c8ClientR[i])
 		{
@@ -995,8 +1298,44 @@ int32_t ResolveCmd_0xFB(json_object *pJsonObj, char c8ClientR[RAND_NUM_CNT], con
 	return 0;
 }
 
+json_object *GetIDPS(int32_t *pErr)
+{
+	json_object *pInfo, *pIDPS;
+	pInfo = json_object_from_file(GATEWAY_INFO_FILE);
+	if (pInfo == NULL)
+	{
+		PRINT("json_object_from_file error\n");
+		*pErr = MY_ERR(_Err_JSON);
+		return NULL;
+	}
+	pIDPS = json_object_object_get(pInfo, "IDPS");
+	if (pIDPS == NULL)
+	{
+		*pErr = MY_ERR(_Err_JSON);
+		json_object_put(pInfo);
+		return NULL;
+	}
+	json_object_get(pIDPS);
+	json_object_put(pInfo);
+	*pErr = 0;
+	return pIDPS;
+}
+static uint32_t s_u32QueueNum = 0;
+inline int32_t AuthCmdAddBaseInfo(json_object *pJsonObj)
+{
+	int32_t s32Err = 0;
+	json_object_object_add(pJsonObj, "Sc", json_object_new_string(AUTHENTICATION_SC));
+	json_object_object_add(pJsonObj, "Sv", json_object_new_string(AUTHENTICATION_SV));
+	json_object_object_add(pJsonObj, "QueueNum", json_object_new_int(s_u32QueueNum++));
+	json_object *pIDPS = GetIDPS(&s32Err);
+	if (s32Err == 0)
+	{
+		json_object_object_add(pJsonObj, "IDPS", pIDPS);
+	}
+	return s32Err;
+}
 
-json_object *BuildupCmdIDPS(int32_t *pErr)
+json_object *BuildupCmd_0xF5_A(char c8Cmd, int32_t *pErr)
 {
 	json_object * pJsonObj = json_object_new_object();
 	if (pJsonObj == NULL)
@@ -1005,41 +1344,23 @@ json_object *BuildupCmdIDPS(int32_t *pErr)
 		return NULL;
 	}
 
-	json_object_object_add(pJsonObj, "sc", json_object_new_string(AUTHENTICATION_SC));
-	json_object_object_add(pJsonObj, "sv", json_object_new_string(AUTHENTICATION_SV));
-
+	*pErr = AuthCmdAddBaseInfo(pJsonObj);
+	if (*pErr != 0)
 	{
-	json_object *pInfo, *pIDPS;
-	pInfo = json_object_from_file(GATEWAY_INFO_FILE);
-	if (pInfo == NULL)
-	{
-		PRINT("json_object_from_file error\n");
-		*pErr = MY_ERR(_Err_JSON);
 		json_object_put(pJsonObj);
 		return NULL;
-	}
-	pIDPS = json_object_object_get(pInfo, "IDPS");
-	if (pIDPS == NULL)
-	{
-		*pErr = MY_ERR(_Err_JSON);
-		json_object_put(pInfo);
-		json_object_put(pJsonObj);
-		return NULL;
-	}
-	json_object_get(pIDPS);
-	json_object_object_add(pJsonObj, "IDPS", pIDPS);
-	json_object_put(pInfo);
 	}
 
 	{
 	char c8Tmp[8];
-	sprintf(c8Tmp, "%02hhX", 0xF5);
+	sprintf(c8Tmp, "%02hhX", c8Cmd);
 	json_object_object_add(pJsonObj, "Command", json_object_new_string(c8Tmp));
 	}
 
 	return pJsonObj;
 }
 
+#if 0
 /* buildup the command of 0xFA, 0xFC, 0xFD for client */
 json_object *BuildupCmd_0xFA_C_D(char c8Cmd, int32_t *pErr)
 {
@@ -1050,8 +1371,13 @@ json_object *BuildupCmd_0xFA_C_D(char c8Cmd, int32_t *pErr)
 		return NULL;
 	}
 
-	json_object_object_add(pJsonObj, "sc", json_object_new_string(AUTHENTICATION_SC));
-	json_object_object_add(pJsonObj, "sv", json_object_new_string(AUTHENTICATION_SV));
+	*pErr = AuthCmdAddBaseInfo(pJsonObj);
+	if (*pErr != 0)
+	{
+		json_object_put(pJsonObj);
+		return NULL;
+	}
+
 	{
 	char c8Tmp[8];
 	sprintf(c8Tmp, "0x%02hhX", c8Cmd);
@@ -1060,8 +1386,9 @@ json_object *BuildupCmd_0xFA_C_D(char c8Cmd, int32_t *pErr)
 
 	return pJsonObj;
 }
+#endif
 
-/* buildup the command of 0xFA, 0xFC, 0xFD for client */
+/* buildup the command of 0xFB for client */
 json_object *BuildupCmd_0xFB(char c8CloudR[RAND_NUM_CNT], char c8ClientR[RAND_NUM_CNT],
 		const char c8ID[PRODUCT_ID_CNT], const char c8Key[XXTEA_KEY_CNT_CHAR],
 		int32_t *pErr)
@@ -1075,9 +1402,14 @@ json_object *BuildupCmd_0xFB(char c8CloudR[RAND_NUM_CNT], char c8ClientR[RAND_NU
 		goto err;
 	}
 
-	json_object_object_add(pJsonObj, "sc", json_object_new_string(AUTHENTICATION_SC));
-	json_object_object_add(pJsonObj, "sv", json_object_new_string(AUTHENTICATION_SV));
-	json_object_object_add(pJsonObj, "Command", json_object_new_string("0xFB"));
+	*pErr = AuthCmdAddBaseInfo(pJsonObj);
+	if (*pErr != 0)
+	{
+		json_object_put(pJsonObj);
+		return NULL;
+	}
+
+	json_object_object_add(pJsonObj, "Command", json_object_new_string("FB"));
 
 	btea((int32_t *)c8CloudR, RAND_NUM_CNT / sizeof(int32_t), (int32_t *)c8Key);
 	{
@@ -1105,7 +1437,7 @@ err:
 	return NULL;
 }
 
-#define TEST_CLOUD		0
+#define TEST_CLOUD		1
 
 typedef struct _tagStIDPS
 {
@@ -1156,7 +1488,7 @@ int32_t CloudAuthentication(StCloudDomain *pStat, bool boIsCoordination,
 	{
 		return MY_ERR(_Err_InvalidParam);
 	}
-	pJsonObj = BuildupCmdIDPS(&s32Err);
+	pJsonObj = BuildupCmd_0xF5_A(0xF5, &s32Err);
 	if (pJsonObj == NULL)
 	{
 		return MY_ERR(_Err_JSON);
@@ -1179,7 +1511,7 @@ int32_t CloudAuthentication(StCloudDomain *pStat, bool boIsCoordination,
 	{
 	StMMap stMap = {NULL};
 	stSendInfo.pSendBody = c8Char;
-
+	stSendInfo.s32BodySize = -1;
 	s32Err = CloudSendAndGetReturn(pStat, &stSendInfo, &stMap);
 	if (s32Err != 0)
 	{
@@ -1214,7 +1546,7 @@ int32_t CloudAuthentication(StCloudDomain *pStat, bool boIsCoordination,
 	}
 #endif
 
-	pJsonObj = BuildupCmd_0xFA_C_D(0xFA, &s32Err);
+	pJsonObj = BuildupCmd_0xF5_A(0xFA, &s32Err);
 	if (pJsonObj == NULL)
 	{
 		return MY_ERR(_Err_JSON);
@@ -1229,6 +1561,7 @@ int32_t CloudAuthentication(StCloudDomain *pStat, bool boIsCoordination,
 	StMMap stMap = {NULL};
 
 	stSendInfo.pSendBody = c8Char;
+	stSendInfo.s32BodySize = -1;
 	s32Err = CloudSendAndGetReturn(pStat, &stSendInfo, &stMap);
 	if (s32Err != 0)
 	{
@@ -1268,6 +1601,7 @@ int32_t CloudAuthentication(StCloudDomain *pStat, bool boIsCoordination,
 	{
 	StMMap stMap = {NULL};
 	stSendInfo.pSendBody = c8Char;
+	stSendInfo.s32BodySize = -1;
 	s32Err = CloudSendAndGetReturn(pStat, &stSendInfo, &stMap);
 	if (s32Err != 0)
 	{
@@ -1287,82 +1621,11 @@ int32_t CloudAuthentication(StCloudDomain *pStat, bool boIsCoordination,
 	}
 #endif
 	}
-#if 0
-	if (s32Err == 0)
-	{
-		pJsonObj = BuildupCmd_0xFA_C_D(0xFC, &s32Err);
-		if (pJsonObj == NULL)
-		{
-			return MY_ERR(_Err_JSON);
-		}
 
-		sprintf(c8Char, "Body:%s", json_object_to_json_string(pJsonObj));
-		json_object_put(pJsonObj);
-		pJsonObj = NULL;
-		PRINT("%s\n", c8Char);
-#if TEST_CLOUD
-		{
-		StSendInfo stSendInfo = {false, NULL, AUTHENTICATION_ADDR, NULL, -1};
-		StMMap stMap = {NULL};
-
-		stSendInfo.pSendBody = c8Char;
-		s32Err = CloudSendAndGetReturn(pStat, &stSendInfo, &stMap);
-		if (s32Err != 0)
-		{
-			return s32Err;
-		}
-		/* analysis the return text */
-		pJsonObj = GetHttpJsonBody(&stMap, &s32Err);
-		CloudMapRelease(&stMap);
-		if (pJsonObj == NULL)
-		{
-			return s32Err;
-		}
-		json_object_put(pJsonObj);
-		pJsonObj = NULL;
-		}
-#endif
-
-	}
-	else if (s32Err == MY_ERR(_Err_Authentication))
-	{
-		pJsonObj = BuildupCmd_0xFA_C_D(0xFD, &s32Err);
-		if (pJsonObj == NULL)
-		{
-			return MY_ERR(_Err_JSON);
-		}
-
-		sprintf(c8Char, "Body:%s", json_object_to_json_string(pJsonObj));
-		json_object_put(pJsonObj);
-		pJsonObj = NULL;
-		PRINT("%s\n", c8Char);
-#if TEST_CLOUD
-		{
-		StSendInfo stSendInfo = {false, NULL, AUTHENTICATION_ADDR, NULL, -1};
-		StMMap stMap = {NULL};
-
-		stSendInfo.pSendBody = c8Char;
-		s32Err = CloudSendAndGetReturn(pStat, &stSendInfo, &stMap);
-		if (s32Err != 0)
-		{
-			return s32Err;
-		}
-		/* analysis the return text */
-		pJsonObj = GetHttpJsonBody(&stMap, &s32Err);
-		CloudMapRelease(&stMap);
-		if (pJsonObj == NULL)
-		{
-			return s32Err;
-		}
-		json_object_put(pJsonObj);
-		pJsonObj = NULL;
-		}
-#endif
-	}
-#endif
 #if TEST_CLOUD
 end:
 #endif
+
 	if (pJsonObj != NULL)
 	{
 		json_object_put(pJsonObj);
@@ -1370,26 +1633,271 @@ end:
 	return s32Err;
 }
 
-
-/* buildup the command of 0xF5 for client */
-json_object *BuildupCmd_0xF5(const char c8ID[PRODUCT_ID_CNT], int32_t *pErr)
+inline int32_t GetSelfRegionCmdAddBaseInfo(json_object *pJsonObj)
 {
-	json_object *pJsonObj = json_object_new_object();
+	int32_t s32Err = 0;
+	json_object_object_add(pJsonObj, "Sc", json_object_new_string(GET_SELF_REGION_SC));
+	json_object_object_add(pJsonObj, "Sv", json_object_new_string(GET_SELF_REGION_SV));
+	json_object_object_add(pJsonObj, "QueueNum", json_object_new_int(s_u32QueueNum++));
+	json_object *pIDPS = GetIDPS(&s32Err);
+	if (s32Err == 0)
+	{
+		json_object_object_add(pJsonObj, "IDPS", pIDPS);
+	}
+	return s32Err;
+}
+
+
+json_object *BuildupCmdGetSelfRegion(int32_t *pErr)
+{
+	json_object * pJsonObj = json_object_new_object();
 	if (pJsonObj == NULL)
 	{
-		PRINT("json_object_new_object");
 		*pErr = MY_ERR(_Err_JSON);
 		return NULL;
 	}
 
-	json_object_object_add(pJsonObj, "sc", json_object_new_string(KEEPALIVE_SC));
-	json_object_object_add(pJsonObj, "sv", json_object_new_string(KEEPALIVE_SV));
-	json_object_object_add(pJsonObj, "Command", json_object_new_string("0xF5"));
-	json_object_object_add(pJsonObj, "ProductID", json_object_new_string_len(c8ID, PRODUCT_ID_CNT));
-
+	*pErr = GetSelfRegionCmdAddBaseInfo(pJsonObj);
+	if (*pErr != 0)
+	{
+		json_object_put(pJsonObj);
+		return NULL;
+	}
 	return pJsonObj;
 }
 
+int32_t ResolveCmdGetSelfRegion(json_object *pJsonObj, char *pRegion, uint32_t u32Size)
+{
+	const char *pTmp = json_object_get_string(pJsonObj);
+	if (pTmp == NULL)
+	{
+		return MY_ERR(_Err_Cloud_JSON);
+	}
+	pRegion[u32Size - 1] = 0;
+	strncpy(pRegion, pTmp + 1, u32Size - 1);	/* \" */
+	pRegion[strlen(pRegion) - 1] = 0;	/* \" */
+	return 0;
+}
+/*
+ * 函数名      : CloudGetSelfRegion
+ * 功能        : 通过云得到自身的区域
+ * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ *             : pRegion [in/out] (char * 类型): 指向输出buffer, 正确时, 保存区域
+ *             : u32Size [in] (uint32_t): pRegion buffer 的大小
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudGetSelfRegion(StCloudDomain *pStat, char *pRegion, uint32_t u32Size)
+{
+	int32_t s32Err = 0;
+	json_object *pJsonObj = NULL;
+	char c8Char[PAGE_SIZE];
+
+	if ((pStat == NULL) || (pRegion == NULL) || (u32Size == 0))
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	pJsonObj = BuildupCmdGetSelfRegion(&s32Err);
+	if (pJsonObj == NULL)
+	{
+		return MY_ERR(_Err_JSON);
+	}
+
+	sprintf(c8Char, "content=%s", json_object_to_json_string(pJsonObj));
+	json_object_put(pJsonObj);
+	pJsonObj = NULL;
+	PRINT("%s\n", c8Char);
+#if TEST_CLOUD
+	{
+	StMMap stMap = {NULL};
+	StSendInfo stSendInfo = {false, NULL, AUTHENTICATION_ADDR, NULL, -1};
+
+	stSendInfo.pSendBody = c8Char;
+	stSendInfo.s32BodySize = -1;
+	s32Err = CloudSendAndGetReturn(pStat, &stSendInfo, &stMap);
+	if (s32Err != 0)
+	{
+		return s32Err;
+	}
+	/* analysis the return text */
+	pJsonObj = GetHttpJsonBody(&stMap, &s32Err);
+	CloudMapRelease(&stMap);
+	if (pJsonObj == NULL)
+	{
+		return s32Err;
+	}
+	s32Err = ResolveCmdGetSelfRegion(pJsonObj, pRegion, u32Size);
+	json_object_put(pJsonObj);
+	pJsonObj = NULL;
+
+	}
+#endif
+	return s32Err;
+}
+
+
+inline int32_t GetRegionMappingCmdAddBaseInfo(json_object *pJsonObj)
+{
+	int32_t s32Err = 0;
+	json_object_object_add(pJsonObj, "Sc", json_object_new_string(GET_REGION_MAPPING_SC));
+	json_object_object_add(pJsonObj, "Sv", json_object_new_string(GET_REGION_MAPPING_SV));
+	json_object_object_add(pJsonObj, "QueueNum", json_object_new_int(s_u32QueueNum++));
+	json_object *pIDPS = GetIDPS(&s32Err);
+	if (s32Err == 0)
+	{
+		json_object_object_add(pJsonObj, "IDPS", pIDPS);
+	}
+	return s32Err;
+}
+
+
+json_object *BuildupCmdGetRegionMapping(int32_t *pErr)
+{
+	json_object * pJsonObj = json_object_new_object();
+	if (pJsonObj == NULL)
+	{
+		*pErr = MY_ERR(_Err_JSON);
+		return NULL;
+	}
+
+	*pErr = GetRegionMappingCmdAddBaseInfo(pJsonObj);
+	if (*pErr != 0)
+	{
+		json_object_put(pJsonObj);
+		return NULL;
+	}
+	return pJsonObj;
+}
+
+int32_t ResolveCmdGetRegionMapping(json_object *pJsonObj, StRegionMapping **p2Mapping, uint32_t *pCnt)
+{
+	int32_t s32Err = 0;
+	uint32_t i;
+	uint32_t u32Cnt = 0;
+	StRegionMapping *pMap = NULL;
+	const char *pKey[3] =
+	{
+		"Region",
+		"CloudUrlVar",
+		"HBUrl",
+	};
+	const uint8_t u8DestSize[3] =
+	{
+		16 - 1,
+		64 - 1,
+		64 - 1,
+	};
+	if (!json_object_is_type(pJsonObj, json_type_array))
+	{
+		return MY_ERR(_Err_Cloud_JSON);
+	}
+
+	u32Cnt = json_object_array_length(pJsonObj);
+	if (u32Cnt == 0)
+	{
+		return MY_ERR(_Err_Cloud_JSON);
+	}
+
+	pMap = malloc(u32Cnt * sizeof(StRegionMapping));
+	if (pMap == NULL)
+	{
+		return MY_ERR(_Err_Mem);
+	}
+	*p2Mapping = pMap;
+
+	for (i = 0; i < u32Cnt; i++)
+	{
+		json_object *pObj = json_object_array_get_idx(pJsonObj, i);
+		char *pDest[3] = {pMap->c8Region, pMap->c8Cloud, pMap->c8Heartbeat};
+		int32_t j;
+		for (j = 0; j < 3; j++)
+		{
+			json_object *pValue = json_object_object_get(pObj, pKey[j]);
+			const char *pTmp = json_object_get_string(pValue);
+			if (pTmp == NULL)
+			{
+				s32Err = MY_ERR(_Err_Cloud_JSON);
+				break;
+			}
+			pDest[j][u8DestSize[j]] = 0;
+			strncpy(pDest[j], pTmp + 1, u8DestSize[j]);
+			pDest[j][strlen(pDest[j]) - 1] = 0;
+		}
+		if (s32Err != 0)
+		{
+			break;
+		}
+		pMap++;
+	}
+	if (s32Err != 0)
+	{
+		free(*p2Mapping);
+		*p2Mapping = NULL;
+		*pCnt = 0;
+	}
+	else
+	{
+		*pCnt = u32Cnt;
+	}
+
+	return s32Err;
+}
+
+/*
+ * 函数名      : CloudGetRegionMapping
+ * 功能        : 通过云得到区域的对应的domain
+ * 参数        : pStat [in] (StCloudStat * 类型): 云状态，详见定义
+ * 			   : p2Mapping [in/out] (StRegionMapping ** 类型): 成功返回申请的数组
+ *             : pCnt [in/out] (uint32_t * 类型): 成功返回*p2Mapping申请的数组的大小
+ * 返回        : 正确返回0, 错误返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t CloudGetRegionMapping(StCloudDomain *pStat, StRegionMapping **p2Mapping, uint32_t *pCnt)
+{
+	int32_t s32Err = 0;
+	json_object *pJsonObj = NULL;
+	char c8Char[PAGE_SIZE];
+
+	if ((pStat == NULL) || (p2Mapping == NULL) || (pCnt == NULL))
+	{
+		return MY_ERR(_Err_InvalidParam);
+	}
+	pJsonObj = BuildupCmdGetRegionMapping(&s32Err);
+	if (pJsonObj == NULL)
+	{
+		return MY_ERR(_Err_JSON);
+	}
+
+	sprintf(c8Char, "content=%s", json_object_to_json_string(pJsonObj));
+	json_object_put(pJsonObj);
+	pJsonObj = NULL;
+	PRINT("%s\n", c8Char);
+#if TEST_CLOUD
+	{
+	StMMap stMap = {NULL};
+	StSendInfo stSendInfo = {false, NULL, AUTHENTICATION_ADDR, NULL, -1};
+
+	stSendInfo.pSendBody = c8Char;
+	stSendInfo.s32BodySize = -1;
+	s32Err = CloudSendAndGetReturn(pStat, &stSendInfo, &stMap);
+	if (s32Err != 0)
+	{
+		return s32Err;
+	}
+	/* analysis the return text */
+	pJsonObj = GetHttpJsonBody(&stMap, &s32Err);
+	CloudMapRelease(&stMap);
+	if (pJsonObj == NULL)
+	{
+		return s32Err;
+	}
+	s32Err = ResolveCmdGetRegionMapping(pJsonObj, p2Mapping, pCnt);
+	json_object_put(pJsonObj);
+	pJsonObj = NULL;
+	}
+#endif
+	return s32Err;
+}
 /*
  * 函数名      : CloudKeepAlive
  * 功能        : 云保活
@@ -1566,6 +2074,69 @@ bool UPDKAIsTimeOut(StUDPKeepalive *pUDP)
 		return true;
 	}
 	return false;
+}
+
+/*
+ * 函数名      : UDPKAGetTimeDiff
+ * 功能        : 得到本地时间与服务器之间的时间差
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ *             : pTimeDiff [in/out] (int64_t *) 用于保存时间差
+ * 返回        : int32_t类型, 正确返回0, 否则返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t UDPKAGetTimeDiff(StUDPKeepalive *pUDP, int64_t *pTimeDiff)
+{
+	int32_t i;
+	int64_t s64TimeDiff = 0;
+
+	if (pUDP == NULL)
+	{
+		return  MY_ERR(_Err_Common);
+	}
+	if (pUDP->u16SendCnt != CMD_CNT)
+	{
+		return  MY_ERR(_Err_Common);
+	}
+	for (i = 0; i < CMD_CNT; i++)
+	{
+		StUDPInfo *pInfo = pUDP->stUDPInfo + i;
+		if (pInfo->u64ReceivedTime != 0)
+		{
+			uint64_t u64EchoTimeDiff = pInfo->u64ReceivedTime - pInfo->u64SendTime;
+			u64EchoTimeDiff = pInfo->u64SendTime + u64EchoTimeDiff / 2;
+			s64TimeDiff += (pInfo->u64ServerTime - u64EchoTimeDiff);
+		}
+		else
+		{
+			return  MY_ERR(_Err_Common);
+		}
+	}
+
+	s64TimeDiff /= CMD_CNT;
+	if (pTimeDiff != NULL)
+	{
+		*pTimeDiff = s64TimeDiff;
+	}
+
+	return 0;
+}
+
+/*
+ * 函数名      : UDPKAClearTimeDiff
+ * 功能        : 清除时间差统计结果
+ * 参数        : pUDP [in] (StUDPKeepalive *) UDPKAInit返回的结构体指针
+ * 返回        : int32_t类型, 正确返回0, 否则返回错误码
+ * 作者        : 许龙杰
+ */
+int32_t UDPKAClearTimeDiff(StUDPKeepalive *pUDP)
+{
+	if (pUDP == NULL)
+	{
+		return  MY_ERR(_Err_Common);
+	}
+
+	pUDP->stUDPInfo[CMD_CNT - 1].u64ReceivedTime = 0;
+	return 0;
 }
 
 /*
@@ -1877,11 +2448,12 @@ void JSONTest()
 }
 #endif
 
-#if 0
+#if 1
 void JSONTest()
 {
 	json_object *new_obj, *pSon_obj;
-	new_obj = json_tokener_parse("{\"Result\": \"1\",\n\t\t \"TS\": 19923928382000, \"ResultMessage\": \"100\", \"ReturnValue\": null }");
+	new_obj = json_tokener_parse("{\"Result\": \"1\",\n\t\t \"TS\": 19923928382000, "\
+			"\"ResultMessage\": \"100\", \"ReturnValue\": null }DADADsdf}");
 	json_object_to_file("/home/lyndon/workspace/nfsboot/GatewayIDPS.idps", new_obj);
 	printf("new_obj.to_string()=%s\n", json_object_to_json_string(new_obj));
 

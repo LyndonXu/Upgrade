@@ -119,7 +119,7 @@ extern "C" {
 
 
 #define XXTEA_KEYCNT			(128)
-#define XXTEA_KEY_CNT_CHAR		(XXTEA_KEYCNT / sizeof(char))
+#define XXTEA_KEY_CNT_CHAR		(XXTEA_KEYCNT / (sizeof(char) * 8))
 
 #define RAND_NUM_CNT			(16)
 #define PRODUCT_ID_CNT			(16)
@@ -127,17 +127,27 @@ extern "C" {
 #define IPV4_ADDR_LENGTH		(16)
 
 #define COORDINATION_DOMAINA				"www.jiuan.com:443"
-#define AUTHENTICATION_SC					"asdfaslkjfhaslkjdcaskjdh"
-#define AUTHENTICATION_SV					"asdfdfdadfabghkhjhkykjdh"
-#define AUTHENTICATION_ADDR					"gateway/auth"
-#define AUTHENTICATION_SECOND_DOMAIN		"api"
+#define AUTHENTICATION_SC					"001cfe2fe7044aa691d4e6eff9bfb56c"
+#define AUTHENTICATION_SV					"56435ce5601f40c59b1db14405578f60"
+#define AUTHENTICATION_ADDR					"api/auth.ashx"
+#define AUTHENTICATION_SECOND_DOMAIN		NULL
 
 #define KEEPALIVE_SC						"asdfaslkjfhaslkjdcaskjdh"
 #define KEEPALIVE_SV						"asdfdfdadfabghkhjhkykjdh"
 #define KEEPALIVE_ADDR						"keepalive.htm"
 
+#define GET_SELF_REGION_SC					AUTHENTICATION_SC
+#define GET_SELF_REGION_SV					"8e8512b786604848a672865fdcdb7b47"
+#define GET_SELF_REGION_ADDR				"api/auth.ashx"
+#define GET_SELF_REGION_SECOND_DOMAIN		NULL
 
-#define LIB_COMPLINE			1
+#define GET_REGION_MAPPING_SC				AUTHENTICATION_SC
+#define GET_REGION_MAPPING_SV				"620dff9a725345828a052d00d9969a48"
+#define GET_REGION_MAPPING_ADDR				"api/auth.ashx"
+#define GET_REGION_MAPPING_SECOND_DOMAIN	NULL
+
+
+#define LIB_COMPLINE
 
 typedef struct _tagStMCSCmdHeader
 {

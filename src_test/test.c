@@ -21,9 +21,53 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+
+//#define JSON_TEST
+//#define STAT_TEST
+//#define UPDATE_TEST
+//#define CRC32_FILE_TEST
+//#define CRC32_TABLE_TEST
+//#define KEEPALIVE_TEST
+//#define UPDKA_TEST
+//#define GET_HOST_IP_TEST
+//#define DB_TEST
+//#define MMAP_TEST
+//#define SEND_FD_TEST
+//#define AUTH_TEST
+//#define XXTEA_TEST
+//#define HTTPS_TEST
+//#define TMPFILE_TEST
+//#define PROCESS_LIST_TEST
+//#define TRAVERSAL_DIR_TEST
+//#define LOG_FILE_TEST
+//#define USAGE_TEST
+//#define LOG_SERVER_TEST
+//#define SLO_TEST
+//#define LOCK_TEST
+#define COMMON_TEST
+
+#if defined COMMON_TEST
+int main()
+{
+	char c8Str[8];
+	c8Str[8 - 1] = 0;
+	strncpy(c8Str, "01234567879", 8 - 1);
+	printf("%s\n", c8Str);
+	return 0;
+}
+
+#elif defined JSON_TEST
 #include "upgrade.h"
 
-#if 1
+int main()
+{
+	void JSONTest();
+	JSONTest();
+	return 0;
+}
+
+#elif defined STAT_TEST
+#include "upgrade.h"
 int main(int argc, char *argv[])
 {
 	struct stat stStat;
@@ -44,8 +88,9 @@ int main(int argc, char *argv[])
 
 	return 0;
 }
-#endif
-#if 0
+
+#elif defined UPDATE_TEST
+#include "upgrade.h"
 int main()
 {
 	int32_t UpdateFileCopyToRun();
@@ -53,9 +98,10 @@ int main()
 	return 0;
 }
 
-#endif
 
-#if 0
+
+#elif defined CRC32_FILE_TEST
+#include "upgrade.h"
 
 int main(int argc, char *argv[])
 {
@@ -72,9 +118,9 @@ int main(int argc, char *argv[])
 
 	return 0;
 }
-#endif
 
-#if 0
+#elif defined CRC32_TABLE_TEST
+#include "upgrade.h"
 
 int main()
 {
@@ -114,10 +160,14 @@ int main()
 }
 
 
-#endif
+#elif defined KEEPALIVE_TEST
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
+#include <sys/time.h>
 
-#if 0
+#include "upgrade.h"
 
 #ifndef PRINT
 #define PRINT(x, ...) printf("[%s:%d]: "x, __FILE__, __LINE__, ##__VA_ARGS__)
@@ -125,12 +175,9 @@ int main()
 
 #define CLOUD_KEEPALIVE_TIME		30
 #define UDP_MSG_HEAD_NAME			"ANGW"
+#define GW_TEST_SN					"0123456789012345"
 #define UDP_MSG_HEAD_NAME_LENGTH	4
 
-static uint32_t s_u32KeepAliveTime = 0;
-static uint32_t s_u32SysTime = 0;
-
-static bool s_boIsCloudOnline = true;
 
 const char c_c8Domain[] = "www.jiuan.com:8000";
 
@@ -147,29 +194,44 @@ typedef struct _tagStUDPMsgHead
 }StUDPMsgHead;
 typedef struct _tagStUDPHeartBeat
 {
-	StUDPMsgHead stHead;
 	uint16_t u16QueueNum;
 	char c8SN[16];
 }StUDPHeartBeat;
 typedef union _tagUnUDPMsg
 {
-	char buf[64];
+	char c8Buf[64];
 	struct
 	{
 		StUDPMsgHead stHead;
 		void *pData;
 	};
-	StUDPHeartBeat stHeartBeat;
 }UnUDPMsg;
 
-int main()
+
+#if HAS_CROSS
+const char c_c8LanName[] = "eth2.2"; /* <TODO> */
+const char c_c8WifiName[] = "wlp2s0"; /* <TODO> */
+#else
+const char c_c8LanName[] = "p8p1";
+const char c_c8WifiName[] = "wlp2s0";
+#endif
+
+/* ./test_upgrade 203.195.202.228 6000 */
+int main(int argc, char *argv[])
 {
-	StCloudDomain stStat = {{_Cloud_IsOnline, "192.169.1.1"}};
-	//char c8Domain[64];
 	int32_t s32Socket = -1;
 
 	UnUDPMsg unUDPMsg;
 	uint16_t u16QueueNum = 0;
+	struct sockaddr stBindAddr = {0};
+	struct sockaddr_in stServerAddr = {0};
+
+	StIPV4Addr stIPV4Addr[4];
+	int32_t s32LanAddr = -1;
+
+	struct sockaddr_in *pTmpAddr = (void *)(&stBindAddr);
+
+	uint64_t u64SendTime = TimeGetTime();
 
 	StUDPKeepalive *pUDPKA = UDPKAInit();
 
@@ -179,211 +241,231 @@ int main()
 		PRINT("error memory\n");
 		goto end;
 	}
+
+
+	if (argc != 3)
+	{
+		PRINT("usage: %s <server> <port>\n", argv[0]);
+	}
+
+	{
+	uint32_t u32Cnt = 4;
+	uint32_t i;
+	while (1)
+	{
+		/* list the network */
+		GetIPV4Addr(stIPV4Addr, &u32Cnt);
+		for (i = 0; i < u32Cnt; i++)
+		{
+			if (strcmp(stIPV4Addr[i].c8Name, c_c8LanName) == 0)
+			{
+				s32LanAddr = i; /* well, the lan is connected */
+				break;
+			}
+			else
+			{
+				PRINT("name is: %s\n", stIPV4Addr[i].c8Name);
+			}
+		}
+		if (i != u32Cnt)
+		{
+			break;
+		}
+		sleep(1);
+	}
+	}
 	s32Socket = socket(AF_INET, SOCK_DGRAM, 0);
 	if (s32Socket < 0)
 	{
 		//PrintLog("socket error: %s\n", strerror(errno));
 		PRINT("socket error: %s\n", strerror(errno));
+	}
+	pTmpAddr->sin_family = AF_INET;
+	pTmpAddr->sin_port = htons(0);
+	if (inet_aton(stIPV4Addr[s32LanAddr].c8IPAddr, &(pTmpAddr->sin_addr)) == 0)
+	{
+		PRINT("local IP Address Error!\n");
 		goto end;
 	}
-	/*
-	 * why we don't bind the socket to the local IP address?
-	 * because we don't know whether the gateway has passed the authentication
-	 */
+
+	if (bind(s32Socket, &stBindAddr, sizeof(struct sockaddr)))
+	{
+		PRINT("bind error: %s\n", strerror(errno));
+		goto end;
+	}
+
+
+	stServerAddr.sin_family = AF_INET;
+	stServerAddr.sin_port = htons(atoi(argv[2]));
+	if (GetHostIPV4Addr(argv[1], NULL, &(stServerAddr.sin_addr)) != 0)
+	{
+		goto end;
+	}
 
 	while (1)
 	{
-		s_u32SysTime = time(NULL);
-		if (s_boIsCloudOnline)
+		fd_set stSet;
+		struct timeval stTimeout;
+
+		stTimeout.tv_sec = 1;
+		stTimeout.tv_usec = 0;
+		FD_ZERO(&stSet);
+		FD_SET(s32Socket, &stSet);
+
+		if (select(s32Socket + 1, &stSet, NULL, NULL, &stTimeout) <= 0)
 		{
-			fd_set stSet;
-			struct timeval stTimeout;
-
-			stTimeout.tv_sec = 1;
-			stTimeout.tv_usec = 0;
-			FD_ZERO(&stSet);
-			FD_SET(s32Socket, &stSet);
-
-			if (select(s32Socket + 1, &stSet, NULL, NULL, &stTimeout) <= 0)
+			goto next;
+		}
+		else if (FD_ISSET(s32Socket, &stSet))
+		{
+			/* we need read some info from the server */
+			struct sockaddr_in stRecvAddr = {0};
+			int32_t s32RecvLen = 0;
+			{
+			/* I don't think we should check the return value */
+			socklen_t s32Len = sizeof(struct sockaddr_in);
+			s32RecvLen = recvfrom(s32Socket, &unUDPMsg, sizeof(UnUDPMsg), 0, (struct sockaddr *)(&stRecvAddr), &s32Len);
+			if (s32RecvLen <= 0 || (s32Len != sizeof (struct sockaddr_in)))
 			{
 				goto next;
 			}
-			else if (FD_ISSET(s32Socket, &stSet))
-			{
-				/* we need read some info from the server */
-				struct sockaddr_in stRecvAddr = {0};
-				int32_t s32RecvLen = 0;
-				{
-				/* I don't think we should check the return value */
-				socklen_t s32Len = 0;
-				s32RecvLen = recvfrom(s32Socket, &unUDPMsg, sizeof(UnUDPMsg), 0, (struct sockaddr *)(&stRecvAddr), &s32Len);
-				if (s32RecvLen <= 0 || (s32Len != sizeof (struct sockaddr_in)))
-				{
-					goto next;
-				}
-				}
-#if 0
-				/* compare stRecvAddr with stServerAddr to check whether the message is mine */
-				/* get the domain and port from the database */
-				if (CloudGetDomainFromRegion(s_s32CloudHandle, _Region_UDP,
-						s_c8GatewayRegion , c8Domain, sizeof(c8Domain)) != 0)
-				{
-					goto next;
-				}
-#endif
-				/* translate the string */
-				GetDomainPortFromString(c_c8Domain, stStat.c8Domain, 64, &(stStat.s32Port));
-				{
-				struct sockaddr_in stServerAddr = {0};
-				stServerAddr.sin_family = AF_INET;
-				stServerAddr.sin_port = htons(stStat.s32Port);
-				/* get the IPV4 address of host via DNS(in this application, the host just has one IP address)  */
-				if (GetHostIPV4Addr(stStat.c8Domain, NULL, &(stServerAddr.sin_addr)) != 0)
-				{
-					goto next;
-				}
-				else if(memcmp(&stServerAddr, &stRecvAddr, sizeof(struct sockaddr)) == 0)
-				{
-					/* well, now, I get a right message */
-					if(memcmp(unUDPMsg.stHead.c8HeadName, UDP_MSG_HEAD_NAME, UDP_MSG_HEAD_NAME_LENGTH) != 0)
-					{
-						goto next;	/* it's not my message */
-					}
-					switch (unUDPMsg.stHead.u16Cmd)
-					{
-					case 1:		/* heartbeat */
-					{
-						uint64_t u64GetTime = TimeGetTime();
-						UDPKAAddAReceivedTime(pUDPKA, unUDPMsg.stHeartBeat.u16QueueNum,
-								u64GetTime, unUDPMsg.stHead.u64TimeStamp);
-						break;
-					}
-					case 3 ... 4:		/* config message */
-					{
-						break;
-					}
-					default:
-						break;
-					}
-				}
-				}
 			}
-next:
-			if (UPDKAIsTimeOut(pUDPKA))
+			if(memcmp(&stServerAddr, &stRecvAddr, sizeof(struct sockaddr)) == 0)
 			{
-				PRINT("I can't receive message from server for a long time\n");
-				s_boIsCloudOnline = false;
-			}
-			else if ((s_u32SysTime - s_u32KeepAliveTime) > CLOUD_KEEPALIVE_TIME)
-			{
+				if (memcmp(unUDPMsg.stHead.c8HeadName, UDP_MSG_HEAD_NAME, UDP_MSG_HEAD_NAME_LENGTH) != 0)
+				{
+					unUDPMsg.stHead.c8Var[0] = 0;
+					PRINT("head name error: %s\n", unUDPMsg.stHead.c8HeadName);
+					goto next;
+				}
+				/* my message */
+				switch (unUDPMsg.stHead.u16Cmd)
+				{
+				case 1:		/* heartbeat */
+				{
+					uint64_t u64GetTime = TimeGetTime();
+					StUDPHeartBeat *pData = (void *)(&(unUDPMsg.pData));
 
-				int32_t s32Err =
-#if 0
-						CloudGetDomainFromRegion(s_s32CloudHandle, _Region_UDP,
-						s_c8GatewayRegion , c8Domain, sizeof(c8Domain));
-				if (s32Err != 0)
-				{
-					continue;
-				}
-#else
-								0;
-#endif
-				GetDomainPortFromString(c_c8Domain, stStat.c8Domain, 64, &(stStat.s32Port));
-				{
-				struct sockaddr_in stServerAddr = {0};
-				stServerAddr.sin_family = AF_INET;
-				stServerAddr.sin_port = htons(stStat.s32Port);
-				s32Err = GetHostIPV4Addr(stStat.c8Domain, NULL, &(stServerAddr.sin_addr));
-				if (s32Err != 0)
-				{
-					continue;
-				}
-				else
-				{
-					/* every time we send, we should check whether the local IP address is changed */
-#if 0
-					s32Err = CloudGetStat(s_s32CloudHandle, &(stStat.stStat));
-					if (s32Err != 0)
+					UDPKAAddAReceivedTime(pUDPKA, pData->u16QueueNum,u64GetTime, unUDPMsg.stHead.u64TimeStamp);
+
+					PRINT("get echo: %d\n", pData->u16QueueNum);
+					PRINT("server %s:%d, and the length is: %d\n",
+							inet_ntoa(stRecvAddr.sin_addr), htons(stRecvAddr.sin_port),
+							s32RecvLen);
+
+
 					{
-						continue;
-					}
-					else
-#endif
-					{
-						struct sockaddr stBindAddr = {0};
-						struct sockaddr_in *pTmpAddr = (void *)(&stBindAddr);
-						socklen_t s32Len = sizeof(struct sockaddr);
-						/* get the current address to which the socket socket is bound */
-						s32Err = getsockname(s32Socket, &stBindAddr, &s32Len);
-						if (s32Err != 0)
+						int32_t i;
+						for (i = 0; i < s32RecvLen; i++)
 						{
-							/* what happened */
-							continue;
-						}
-						else
-						{
-							in_addr_t u32LocalInternetAddr;
-							u32LocalInternetAddr = htonl(INADDR_ANY);
-							if (u32LocalInternetAddr != pTmpAddr->sin_addr.s_addr)
+							printf("0x%02hhx ", unUDPMsg.c8Buf[i]);
+							if ((i & 0x07) == 0x07)
 							{
-								/*
-								 * we find that the address has changed, we should re-bind the socket, but very sorry,
-								 * there is no right system API can finish this directly, so, we close the socket
-								 * and open a new socket, then, bind it
-								 */
-								close(s32Socket);
-								s32Socket = socket(AF_INET, SOCK_DGRAM, 0);
-								if (s32Socket < 0)
-								{
-									PrintLog("socket error: %s\n", strerror(errno));
-									PRINT("socket error: %s\n", strerror(errno));
-									goto end;
-								}
-								pTmpAddr->sin_family = AF_INET;
-								pTmpAddr->sin_port = htons(0);
-								pTmpAddr->sin_addr.s_addr = u32LocalInternetAddr;
-								if (bind(s32Socket, &stBindAddr, sizeof(struct sockaddr)))
-								{
-									PRINT("bind error: %s\n", strerror(errno));
-									PrintLog("bind error: %s\n", strerror(errno));
-									continue;
-								}
+								printf("\n");
 							}
 						}
+						printf("\n");
 					}
-					/* I don't think we should check the return value */
-					memcpy(unUDPMsg.stHead.c8HeadName, UDP_MSG_HEAD_NAME, UDP_MSG_HEAD_NAME_LENGTH);
-					unUDPMsg.stHead.u64TimeStamp = TimeGetTime();
-					unUDPMsg.stHead.u16Cmd = 1;
-					unUDPMsg.stHead.u16CmdLength = sizeof(StUDPHeartBeat) - sizeof(StUDPMsgHead);
-					unUDPMsg.stHeartBeat.u16QueueNum = u16QueueNum;
-					sendto(s32Socket, &unUDPMsg, sizeof(UnUDPMsg), MSG_NOSIGNAL,
-							(struct sockaddr *)(&stServerAddr), sizeof(struct sockaddr));
-					UDPKAAddASendTime(pUDPKA, u16QueueNum++, unUDPMsg.stHead.u64TimeStamp);
-					PRINT("CloudKeepAlive OK\n");
-					s_u32KeepAliveTime = s_u32SysTime;
+					break;
 				}
+				case 3 ... 4:		/* config message */
+				{
+					break;
+				}
+				default:
+					break;
 				}
 			}
+			else
+			{
+				PRINT("Unknown server %s:%d(%d), and the length is: %d\n",
+						inet_ntoa(stRecvAddr.sin_addr), htons(stRecvAddr.sin_port), stRecvAddr.sin_family,
+						s32RecvLen);
+				{
+					int32_t i;
+					for (i = 0; i < s32RecvLen; i++)
+					{
+						printf("0x%02hhx ", unUDPMsg.c8Buf[i]);
+						if ((i & 0x07) == 0x07)
+						{
+							printf("\n");
+						}
+					}
+					printf("\n");
+				}
+				goto next;
+			}
 		}
-		else
+next:
+		if ((TimeGetTime() - u64SendTime) < 1000)
 		{
-			sleep(1);
-			UDPKAReset(pUDPKA);
+			int64_t s64TimeDiff = 0;
+			if (UDPKAGetTimeDiff(pUDPKA, &s64TimeDiff) == 0)
+			{
+				PRINT("\n\ntime diff is: %lld\n", s64TimeDiff);
+#if HAS_CROSS
+				if ((s64TimeDiff < -1000) || (s64TimeDiff > 1000))
+				{
+					struct timeval stTime;
+					uint64_t u64Time = TimeGetTime();
+					u64Time += s64TimeDiff;
+					stTime.tv_sec = u64Time / 1000;
+					stTime.tv_usec = (u64Time % 1000) * 1000;
+					settimeofday(&stTime, NULL);
+					u64Time /= 1000;
+					PRINT("adjust time to: %s\n\n", ctime((void *)(&u64Time)));
+					/* after we adjust the time difference, we clear this statistics */
+					UDPKAClearTimeDiff(pUDPKA);
+				}
+#endif
+			}
+			continue;
 		}
+		/* I don't think we should check the return value */
+		memset(&unUDPMsg, 0, sizeof(UnUDPMsg));
+		memcpy(unUDPMsg.stHead.c8HeadName, UDP_MSG_HEAD_NAME, UDP_MSG_HEAD_NAME_LENGTH);
+		u64SendTime = unUDPMsg.stHead.u64TimeStamp = TimeGetTime();
+		unUDPMsg.stHead.u16Cmd = 1;
+		unUDPMsg.stHead.u16CmdLength = sizeof(StUDPHeartBeat);
+		{
+			StUDPHeartBeat *pData = (void *)(&(unUDPMsg.pData));
+			pData->u16QueueNum = u16QueueNum;
+			memcpy(pData->c8SN, GW_TEST_SN, sizeof(pData->c8SN));
+		}
+		sendto(s32Socket, &unUDPMsg, sizeof(StUDPMsgHead) + sizeof(StUDPHeartBeat), MSG_NOSIGNAL,
+				(struct sockaddr *)(&stServerAddr), sizeof(struct sockaddr));
+
+		UDPKAAddASendTime(pUDPKA, u16QueueNum, unUDPMsg.stHead.u64TimeStamp);
+
+		PRINT("send a heart beat: %d at %lld\n", u16QueueNum, unUDPMsg.stHead.u64TimeStamp);
+		{
+
+			int32_t i;
+			for (i = 0; i < sizeof(StUDPMsgHead) + sizeof(StUDPHeartBeat); i++)
+			{
+				printf("0x%02hhx ", unUDPMsg.c8Buf[i]);
+				if ((i & 0x07) == 0x07)
+				{
+					printf("\n");
+				}
+			}
+			printf("\n\n");
+
+		}
+
+		u16QueueNum++;
+
 	}
 end:
+	UDPKADestroy(pUDPKA);
 	if (s32Socket >= 0)
 	{
 		close(s32Socket);
 	}
-	UDPKADestroy(pUDPKA);
-return 0;
+	return 0;
 }
 
-#endif
-
-#if 0
+#elif defined UPDKA_TEST
 int main()
 {
 	StUDPKeepalive *pUDP = UDPKAInit();
@@ -399,9 +481,8 @@ int main()
 	return 0;
 }
 
-#endif
-
-#if 0
+#elif defined GET_HOST_IP_TEST
+#include "upgrade.h"
 int main()
 {
 	char c8IPV4[IPV4_ADDR_LENGTH];
@@ -409,29 +490,20 @@ int main()
 	return 0;
 }
 
-#endif
 
-#if 0
-int main()
-{
-	void JSONTest();
-	JSONTest();
-	return 0;
-}
+#elif defined DB_TEST
+#include "upgrade.h"
 
-#endif
-
-#if 0
 #define		FILE_MODE	(S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH)
 #define		TEST_CNT	500
 int main(void)
 {
-	DBHANDLE	db;
+	void *db;
 	int i;
 	char c8Buf[TEST_CNT][32], c8Data[64];
 	uint64_t u64Time;
 	srand((int)time(NULL));
-	if ((db = db_open("/tmp/db", O_RDWR | O_CREAT | O_TRUNC, FILE_MODE)) == NULL)
+	if ((db = DBOpen("/tmp/db", O_RDWR | O_CREAT | O_TRUNC, FILE_MODE)) == NULL)
 	{
 		printf("db_open error\n");
 		exit(1);
@@ -446,7 +518,7 @@ int main(void)
 			c8Data[j] = (rand() % 10) + '0';
 		}
 		c8Data[j] = 0;
-		if (db_store(db, c8Buf[i], c8Data, DB_STORE) == -1)
+		if (DBStore(db, c8Buf[i], c8Data, DB_STORE) == -1)
 		{
 			printf("db_store error for %s, %s\n", c8Buf[i], c8Data);
 			exit(1);
@@ -455,7 +527,7 @@ int main(void)
 	u64Time = TimeGetTime();
 	for (i = 0; i < TEST_CNT; i++)
 	{
-		if (db_fetch(db, c8Buf[i]) == NULL)
+		if (DBFetch(db, c8Buf[i]) == NULL)
 		{
 			printf("db_fetch error for %d----%s\n", i, c8Buf[i]);
 			exit(1);
@@ -464,12 +536,13 @@ int main(void)
 	u64Time = TimeGetTime() - u64Time;
 	printf("find %d entry using time: %lldms\n", TEST_CNT, u64Time);
 
-	db_close(db);
+	DBClose(db);
 	exit(0);
 }
-#endif
 
-#if 0
+#elif defined MMAP_TEST
+#include "upgrade.h"
+
 #define TEST_CNT	4096
 #if 1 /* mmap memory file */
 #include <sys/mman.h>
@@ -550,9 +623,10 @@ int main()
 	return 0;
 }
 #endif
-#endif
 
-#if 0
+
+#elif defined SEND_FD_TEST
+#include "upgrade.h"
 #include <sys/types.h>
 #include <sys/time.h>
 #include <unistd.h>
@@ -644,23 +718,100 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
+
+#elif defined AUTH_TEST
+#ifndef PRINT
+#define PRINT(x, ...) printf("[%s:%d]: "x, __FILE__, __LINE__, ##__VA_ARGS__)
 #endif
 
-#if 0
-int main()
+
+#if HAS_CROSS
+const char c_c8LanName[] = "eth2.2"; /* <TODO> */
+const char c_c8WifiName[] = "wlp2s0"; /* <TODO> */
+#else
+const char c_c8LanName[] = "p8p1";
+const char c_c8WifiName[] = "wlp2s0";
+#endif
+
+#include "upgrade.h"
+/* ./test_upgrade 203.195.202.228 443 */
+int main(int argc, char *argv[])
 {
 	StCloudDomain stStat = {{_Cloud_IsOnline}};
-	const char c8ID[PRODUCT_ID_CNT] = {"01234567/9012345"};
-	const char c8Key[XXTEA_KEY_CNT_CHAR] = {"0123456789012345"};
-	CloudAuthentication(&stStat, c8ID, c8Key);
+	StIPV4Addr stIPV4Addr[4];
+	int32_t s32LanAddr = 0;
+#if 1
+	const char c8ID[PRODUCT_ID_CNT] = {"0123456789012345"};
+	const char c8Key[XXTEA_KEY_CNT_CHAR] =
+	{
+		0xC5, 0x14, 0x68, 0x31, 0xB3, 0x9F, 0xF0, 0xCC,
+		0x23, 0xA5, 0x9C, 0x30, 0x19, 0x6D, 0x38, 0x73
+	};
+#else
+	const char c8ID[PRODUCT_ID_CNT] =
+	{
+		0x31, 0x34, 0x30, 0x36, 0x31, 0x38, 0x30, 0x30,
+		0x30, 0x30, 0x30, 0x30, 0x30, 0x30, 0x32, 0x30
+	};
+	const char c8Key[XXTEA_KEY_CNT_CHAR] =
+	{
+		0x6e, 0x2e, 0xcb, 0x96, 0x30, 0xb2, 0x98, 0x64,
+		0x8c, 0xf9, 0x42, 0x12, 0x50, 0x95, 0x83, 0x36
+	};
+
+#endif
+	if (argc != 3)
+	{
+		PRINT("usage: %s <server> <port>\n", argv[0]);
+		return -1;
+	}
+	SSL_Init();
+	{
+	uint32_t u32Cnt = 4;
+	uint32_t i;
+	while (1)
+	{
+		/* list the network */
+		GetIPV4Addr(stIPV4Addr, &u32Cnt);
+		for (i = 0; i < u32Cnt; i++)
+		{
+			if (strcmp(stIPV4Addr[i].c8Name, c_c8LanName) == 0)
+			{
+				s32LanAddr = i; /* well, the lan is connected */
+				break;
+			}
+			else
+			{
+				PRINT("name is: %s\n", stIPV4Addr[i].c8Name);
+			}
+		}
+		if (i != u32Cnt)
+		{
+			break;
+		}
+		sleep(1);
+	}
+	}
+	memcpy(stStat.stStat.c8ClientIPV4, stIPV4Addr[s32LanAddr].c8IPAddr, 16);
+	memcpy(stStat.c8Domain, argv[1], strlen(argv[1]));
+	stStat.s32Port = atoi(argv[2]);
+	if (CloudAuthentication(&stStat, true, c8ID, c8Key) == 0)
+	{
+		PRINT("Auth OK!\n");
+	}
 	CloudKeepAlive(&stStat, c8ID);
+
+	SSL_Destory();
 	return 0;
 }
-#endif
-#if 0
+
+
+#elif defined XXTEA_TEST
+#include "upgrade.h"
 
 int main()
 {
+#if 0
 	int32_t s32Key[4] =
 	{
 		0x01234567, 0x89ABCDEF, 0xFEDCBA98, 0x76543210
@@ -690,36 +841,114 @@ int main()
 		}
 		printf("\n\n\n");
 	}
+#else
 
+
+	int32_t i;
+	char c8RServer[36] = {"\"919C7F4CD2F361098D6F52AF835FE4A4\""}, c8R[16];
+#if 1
+	const char c8Key[16] =
+	{
+		0xC5, 0x14, 0x68, 0x31,
+		0xB3, 0x9F, 0xF0, 0xCC,
+		0x23, 0xA5, 0x9C, 0x30,
+		0x19, 0x6D, 0x38, 0x73
+	};
+#else
+	const char c8Key[16] =
+	{
+		0x31, 0x68, 0x14, 0xC5,
+		0xCC, 0xF0, 0x9F, 0xB3,
+		0x30, 0x9C, 0xA5, 0x23,
+		0x73, 0x38, 0x6D, 0x19,
+	};
+#endif
+	char c8Buf[4] = {0};
+	for (i = 0; i < 16; i++)
+	{
+		uint32_t u32Tmp = i;
+		uint32_t u32Tmp1 = i;
+#if 0
+		u32Tmp1 /= 4;
+		u32Tmp1 += 1;
+		u32Tmp1 *= 4;
+		u32Tmp1 -= u32Tmp;
+		u32Tmp1--;
+#endif
+		c8Buf[0] = c8RServer[u32Tmp1 * 2 + 1];		/* \" */
+		c8Buf[1] = c8RServer[u32Tmp1 * 2 + 2];
+		sscanf(c8Buf, "%02hhX", c8R + i);
+		printf("%02hhX", c8R[i]);
+	}
+	printf("\n");
+	btea((int32_t *)c8R, 4, (int32_t *)c8Key);
+	for (i = 0; i < 16; i++)
+	{
+		printf("%02hhX", c8R[i]);
+	}
+	printf("\n");
+#endif
 	return 0;
 }
 
 
-#endif
 
-#if 0
+#elif defined HTTPS_TEST
+#include "upgrade.h"
 //ebsnew.boc.cn/boc15/login.html
 //pbnj.ebank.cmbchina.com/CmbBank_GenShell/UI/GenShellPC/Login/Login.aspx
 //ebank.spdb.com.cn/per/gb/otplogin.jsp
+/*
+ * 1、api1--网关认证询问测试地址：
+http://203.195.202.228:8008/API/auth.ashx
+
+2、post内容：
+content={"Sc":"001cfe2fe7044aa691d4e6eff9bfb56c",
+"Sv":"56435ce5601f40c59b1db14405578f60","QueueNum":123,
+"IDPS":{"Ptl":"com.jiuan.BPV20","SN":"00000001","FVer":"1.0.2",
+"HVer":"1.0.1","MFR":"iHealth","Model":"BP3 11070","Name":"BP Monitor"},"Command":"F5"}
+
+因为服务器redis服务还没有更新，所以目前返回结果为：
+{"Result":3,"QueueNum":123,"ResultMessage":"5000","TS":1402907636419,"ReturnValue":"通用缓存异常"}
+更新之后，正确结果:{"Result":1,"QueueNum":123,"ResultMessage":"1000","TS":1402906148304,"ReturnValue":"F0"}
+
+如果仅仅为了测试通道发送和接收，目前已经具备条件，可以测试！
+ *
+ */
+#define LOACAL_IP				"10.0.0.108"
+#define HTTPS					1
+#if 1
+#define SERVER_DOMAIN			"203.195.202.228"
+#if HTTPS
+#define SERVER_PORT				443
+#else
+#define SERVER_PORT				8008
+#endif
+#define SERVER_SECOND_DOMAIN	NULL
+#define SERVER_FILE				"API/auth.ashx"
+
+#define SEND_BODY				"content={\"Sc\":\"001cfe2fe7044aa691d4e6eff9bfb56c\","\
+								"\"Sv\":\"56435ce5601f40c59b1db14405578f60\",\"QueueNum\":123,"\
+								"\"IDPS\":{\"Ptl\":\"com.jiuan.BPV20\",\"SN\":\"00000001\",\"FVer\":\"1.0.2\","\
+								"\"HVer\":\"1.0.1\",\"MFR\":\"iHealth\",\"Model\":\"BP3 11070\","\
+								"\"Name\":\"BP Monitor\"},\"Command\":\"F5\"}"
+#define BODY_LENGTH				(sizeof(SEND_BODY) - 1)
+#else
+#define SERVER_DOMAIN			"www.baidu.com"
+#define SERVER_PORT				80
+#define SERVER_SECOND_DOMAIN	NULL
+#define SERVER_FILE				"per/gb/otplogin.jsp"
+
+#define SEND_BODY				NULL
+#define BODY_LENGTH				0
+#endif
 int main()
 {
-	StCloudDomain stStat = { {_Cloud_IsOnline, "10.0.0.110"}, "spdb.com.cn", 443};
-	StSendInfo  stInfo = { false, "ebank", "per/gb/otplogin.jsp"};
+	StCloudDomain stStat = { {_Cloud_IsOnline, LOACAL_IP}, SERVER_DOMAIN, SERVER_PORT};
+	StSendInfo  stInfo = { false, SERVER_SECOND_DOMAIN, SERVER_FILE, SEND_BODY, BODY_LENGTH};
 	StMMap stMMap = {NULL,};
 	int32_t s32Err;
-#if 0
-	SSL_Init();
-	printf("network: %s, IP address: %s begin to try\n", "br0", stStat.c8ClientIPV4);
-	s32Err = CloudSendAndGetReturn(&stStat, &stInfo, &stMMap);
-	if (s32Err == 0)
-	{
-		FILE *pFile = fopen("login.jsp", "wb+");
-		fwrite(stMMap.pMap, stMMap.u32MapSize, 1, pFile);
-		fclose(pFile);
-		CloudMapRelease(&stMMap);
-	}
-	SSL_Destory();
-#else
+
 	StIPV4Addr stAddr[8];
 	uint32_t i, u32AddrSize = 8;
 
@@ -730,7 +959,6 @@ int main()
 	{
 		return -1;
 	}
-#if 1
 	SSL_Init();
 
 	for (i = 0; i < u32AddrSize; i++)
@@ -741,7 +969,11 @@ int main()
 		}
 		printf("network: %s, IP address: %s begin to try\n", stAddr[i].c8Name, stAddr[i].c8IPAddr);
 		strncpy(stStat.stStat.c8ClientIPV4, stAddr[i].c8IPAddr, 16);
+#if HTTPS
 		s32Err = CloudSendAndGetReturn(&stStat, &stInfo, &stMMap);
+#else
+		s32Err = CloudSendAndGetReturnNoSSL(&stStat, &stInfo, &stMMap);
+#endif
 		if (s32Err == 0)
 		{
 			FILE *pFile = fopen("login.jsp", "wb+");
@@ -752,14 +984,13 @@ int main()
 	}
 
 	SSL_Destory();
-#endif
-#endif
 	return 0;
 }
-#endif
 
 
-#if 0
+
+#elif defined TMPFILE_TEST
+#include "upgrade.h"
 #include <sys/types.h>
 #include <unistd.h>
 int main()
@@ -784,9 +1015,11 @@ int main()
 	fclose(pFile);
 	return 0;
 }
-#endif
-#if 0
 
+
+
+#elif defined PROCESS_LIST_TEST
+#include "upgrade.h"
 
 #include <signal.h>
 #include <unistd.h>
@@ -824,12 +1057,8 @@ int main(int argc, char *argv[])
 }
 
 
-#endif
 
-
-
-
-#if 0
+#elif defined TRAVERSAL_DIR_TEST
 #include "common_define.h"
 #include "upgrade.h"
 
@@ -846,13 +1075,14 @@ int main(int argc, char *argv[])
 		printf("usage: %s directory\n", argv[0]);
 	}
 
-	TranversaDir(argv[1], true, Callback, NULL);
+	TraversalDir(argv[1], true, Callback, NULL);
 
 	return 0;
 }
-#endif
 
-#if 0
+
+#elif defined LOG_FILE_TEST
+#include "upgrade.h"
 int main(int argc, char *argv[])
 {
 	int i;
@@ -921,10 +1151,10 @@ int main(int argc, char *argv[])
 	getchar();	return 0;
 }
 
-#endif
 
-
-#if 0
+#elif defined USAGE_TEST
+#include <common_define.h>
+#include "upgrade.h"
 int main(int argc, char *argv[])
 {
 	int32_t s32Pid = 0;
@@ -989,11 +1219,11 @@ int main(int argc, char *argv[])
 
 	return 0;
 }
-#endif
 
 
-#if 0
-
+#elif defined LOG_SERVER_TEST
+#include "common_define.h"
+#include "upgrade.h"
 static bool s_boIsExit = false;
 static void ProcessStop(int32_t s32Signal)
 {
@@ -1108,50 +1338,11 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-#endif
 
+#elif defined SLO_TEST
 
-
-#if 0
-
-#if 1
-int main(int argc, char *argv[])
-{
-	int32_t s32Handle;
-	if (argc > 1)
-	{
-		s32Handle = ProcessListCreate(NULL);
-	}
-	else
-	{
-		int32_t i = 0;
-		s32Handle = ProcessListInit(NULL);
-		printf("ProcessListUpdate\n");
-		for (i = 0; i < 5; i++)
-		{
-			int32_t s32Err = ProcessListUpdate(s32Handle);
-			printf("ProcessListUpdate error: 0x%08x\n", s32Err);
-		}
-	}
-
-	printf("Hello World!\nPress enter key to exit!\n");
-	getchar();
-
-	if (argc > 1)
-	{
-		ProcessListTombDestroy(s32Handle);
-	}
-	else
-	{
-		ProcessListDestroy(s32Handle);
-	}
-
-	return 0;
-}
-
-
-#else
-
+#include "common_define.h"
+#include "upgrade.h"
 static int32_t Compare(void *pLeft, void *pAdditionData, void *pRight)
 {
 	if (((StProcessInfo *)pLeft)->u32Pid == ((StProcessInfo *)pRight)->u32Pid)
@@ -1246,9 +1437,7 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-#endif
-#endif
-#if 0
+#elif defined LOCK_TEST
 int main(void)
 {
 	int32_t s32Handle = 0, s32Err = 0, s32Cnt = 0;

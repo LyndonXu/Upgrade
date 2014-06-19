@@ -124,8 +124,8 @@ int32_t TraversalDir(const char *pPathName, bool boIsRecursion,
 
 
 
-#define	 MX (((z >> 5) ^ (y << 2)) + (((y >> 3) ^ (z << 4)) ^ (sum ^ y)) + (k[(p & 3) ^ e] ^ z))
-
+#define	 MX ((((z >> 5) ^ (y << 2)) + ((y >> 3) ^ (z << 4))) ^ ((sum ^ y) + (k[(p & 3) ^ e] ^ z)))
+//#define MX		(((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^ ((sum ^ y) + (k[(p & 3) ^ e] ^ z)))
 
 /*
  * 函数名      : btea
@@ -367,6 +367,7 @@ int32_t GetHostIPV4Addr(const char *pHost, char c8IPV4Addr[IPV4_ADDR_LENGTH], st
 		if (s32Err == 0)
 		{
 			struct sockaddr_in *pTmp =  (struct sockaddr_in *)(pRslt->ai_addr);
+			PRINT("server ip: %s\n", inet_ntoa(pTmp->sin_addr));
 			if (pInternetAddr != NULL)
 			{
 				*pInternetAddr = pTmp->sin_addr;
@@ -376,6 +377,7 @@ int32_t GetHostIPV4Addr(const char *pHost, char c8IPV4Addr[IPV4_ADDR_LENGTH], st
 				inet_ntop(AF_INET, (void *)(&(pTmp->sin_addr)), c8IPV4Addr, IPV4_ADDR_LENGTH);
 				PRINT("after inet_ntoa: %s\n", c8IPV4Addr);		/* just get the first address */
 			}
+			freeaddrinfo(pRslt);
 			return 0;
 		}
 		else
