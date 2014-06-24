@@ -33,7 +33,7 @@
 //#define DB_TEST
 //#define MMAP_TEST
 //#define SEND_FD_TEST
-//#define AUTH_TEST
+#define AUTH_TEST
 //#define XXTEA_TEST
 //#define HTTPS_TEST
 //#define TMPFILE_TEST
@@ -44,9 +44,95 @@
 //#define LOG_SERVER_TEST
 //#define SLO_TEST
 //#define LOCK_TEST
-#define COMMON_TEST
+//#define COMMON_TEST
+//#define GET_REGION_TEST
 
-#if defined COMMON_TEST
+
+
+
+#if defined GET_REGION_TEST
+#include "upgrade.h"
+
+#ifndef PRINT
+#define PRINT(x, ...) printf("[%s:%d]: "x, __FILE__, __LINE__, ##__VA_ARGS__)
+#endif
+
+/* ./test_upgrade 203.195.202.228 443 */
+int main(int argc, char *argv[])
+{
+	StCloudDomain stStat = {{_Cloud_IsOnline}};
+	StIPV4Addr stIPV4Addr[4];
+	int32_t s32LanAddr = 0;
+	char c8Region[16];
+
+	StRegionMapping *pMap = NULL;
+	uint32_t u32Cnt = 0;
+	if (argc != 3)
+	{
+		PRINT("usage: %s <server> <port>\n", argv[0]);
+		return -1;
+	}
+	SSL_Init();
+	{
+	uint32_t u32Cnt = 4;
+	uint32_t i;
+	while (1)
+	{
+		/* list the network */
+		GetIPV4Addr(stIPV4Addr, &u32Cnt);
+		for (i = 0; i < u32Cnt; i++)
+		{
+			if (strcmp(stIPV4Addr[i].c8Name, "lo") != 0)
+			{
+				s32LanAddr = i; /* well, the lan is connected */
+				PRINT("get network: %s, and I will bind it\n", stIPV4Addr[i].c8Name);
+				break;
+			}
+			else
+			{
+				PRINT("name is: %s\n", stIPV4Addr[i].c8Name);
+			}
+		}
+		if (i != u32Cnt)
+		{
+			break;
+		}
+		sleep(1);
+	}
+	}
+	memcpy(stStat.stStat.c8ClientIPV4, stIPV4Addr[s32LanAddr].c8IPAddr, 16);
+	memcpy(stStat.c8Domain, argv[1], strlen(argv[1]));
+	stStat.s32Port = atoi(argv[2]);
+	{
+	int32_t i;
+	for (i = 0; i < 1; i++)
+	{
+		if (CloudGetSelfRegion(&stStat, c8Region, 16) == 0)
+		{
+			PRINT("gateway's region is: %s\n", c8Region);
+		}
+
+		if (CloudGetRegionMapping(&stStat, &pMap, &u32Cnt) == 0)
+		{
+			uint32_t i = 0;
+			for (i = 0; i < u32Cnt; i++)
+			{
+				PRINT("region: %s\n", pMap[i].c8Region);
+				PRINT("cloud: %s\n", pMap[i].c8Cloud);
+				PRINT("heartbeat: %s\n\n", pMap[i].c8Heartbeat);
+			}
+			free(pMap);
+		}
+	}
+	}
+
+
+
+	SSL_Destory();
+	return 0;
+}
+
+#elif defined COMMON_TEST
 int main()
 {
 	char c8Str[8];
@@ -216,7 +302,7 @@ const char c_c8LanName[] = "p8p1";
 const char c_c8WifiName[] = "wlp2s0";
 #endif
 
-/* ./test_upgrade 203.195.202.228 6000 */
+/* ./test_upgrade 203.195.202.228 6000 eth2 */
 int main(int argc, char *argv[])
 {
 	int32_t s32Socket = -1;
@@ -257,9 +343,11 @@ int main(int argc, char *argv[])
 		GetIPV4Addr(stIPV4Addr, &u32Cnt);
 		for (i = 0; i < u32Cnt; i++)
 		{
-			if (strcmp(stIPV4Addr[i].c8Name, c_c8LanName) == 0)
+			//if (strcmp(stIPV4Addr[i].c8Name, argv[3]) == 0)
+			if (strcmp(stIPV4Addr[i].c8Name, "lo") != 0)
 			{
 				s32LanAddr = i; /* well, the lan is connected */
+				PRINT("network name is: %s, and I will bind it.\n", stIPV4Addr[i].c8Name);
 				break;
 			}
 			else
@@ -740,6 +828,40 @@ int main(int argc, char *argv[])
 	StCloudDomain stStat = {{_Cloud_IsOnline}};
 	StIPV4Addr stIPV4Addr[4];
 	int32_t s32LanAddr = 0;
+
+#if 1
+	char c8ID[PRODUCT_ID_CNT];
+	char c8Key[XXTEA_KEY_CNT_CHAR];
+	{
+	int32_t i;
+	char c8Buf[4] = {0};
+	const char *pID = "31343036313830303030303030303234";
+	const char *pKey = "2fe78b0d913d727c55b40f483b525d2d";
+	printf("ID: \n");
+	for (i = 0; i < 16; i++)
+	{
+		uint32_t u32Tmp = i * 2;
+		c8Buf[0] = pID[u32Tmp];
+		c8Buf[1] = pID[u32Tmp + 1];
+		sscanf(c8Buf, "%02hhX", c8ID + i);
+		printf("%02hhX", c8ID[i]);
+	}
+	printf("\n");
+
+	printf("Key: \n");
+	for (i = 0; i < 16; i++)
+	{
+		uint32_t u32Tmp = i * 2;
+		c8Buf[0] = pKey[u32Tmp];
+		c8Buf[1] = pKey[u32Tmp + 1];
+		sscanf(c8Buf, "%02hhX", c8Key + i);
+		printf("%02hhX", c8Key[i]);
+	}
+	printf("\n");
+
+	}
+
+#else
 #if 1
 	const char c8ID[PRODUCT_ID_CNT] = {"0123456789012345"};
 	const char c8Key[XXTEA_KEY_CNT_CHAR] =
@@ -759,6 +881,7 @@ int main(int argc, char *argv[])
 		0x8c, 0xf9, 0x42, 0x12, 0x50, 0x95, 0x83, 0x36
 	};
 
+#endif
 #endif
 	if (argc != 3)
 	{
@@ -845,8 +968,9 @@ int main()
 
 
 	int32_t i;
-	char c8RServer[36] = {"\"919C7F4CD2F361098D6F52AF835FE4A4\""}, c8R[16];
-#if 1
+	char c8RServer[36] = {"899AD0DE672482234961E4B1D90FEE6B"}, c8R[16];
+	char c8KeyAscii[36] = {"6e2ecb9630b298648cf9421250958336"}, c8Key[16];
+#if 0
 	const char c8Key[16] =
 	{
 		0xC5, 0x14, 0x68, 0x31,
@@ -854,7 +978,6 @@ int main()
 		0x23, 0xA5, 0x9C, 0x30,
 		0x19, 0x6D, 0x38, 0x73
 	};
-#else
 	const char c8Key[16] =
 	{
 		0x31, 0x68, 0x14, 0xC5,
@@ -864,23 +987,29 @@ int main()
 	};
 #endif
 	char c8Buf[4] = {0};
+	printf("R: \n");
 	for (i = 0; i < 16; i++)
 	{
-		uint32_t u32Tmp = i;
-		uint32_t u32Tmp1 = i;
-#if 0
-		u32Tmp1 /= 4;
-		u32Tmp1 += 1;
-		u32Tmp1 *= 4;
-		u32Tmp1 -= u32Tmp;
-		u32Tmp1--;
-#endif
-		c8Buf[0] = c8RServer[u32Tmp1 * 2 + 1];		/* \" */
-		c8Buf[1] = c8RServer[u32Tmp1 * 2 + 2];
+		uint32_t u32Tmp = i * 2;
+		c8Buf[0] = c8RServer[u32Tmp];
+		c8Buf[1] = c8RServer[u32Tmp + 1];
 		sscanf(c8Buf, "%02hhX", c8R + i);
 		printf("%02hhX", c8R[i]);
 	}
 	printf("\n");
+
+	printf("Key: \n");
+	for (i = 0; i < 16; i++)
+	{
+		uint32_t u32Tmp = i * 2;
+		c8Buf[0] = c8KeyAscii[u32Tmp];
+		c8Buf[1] = c8KeyAscii[u32Tmp + 1];
+		sscanf(c8Buf, "%02hhX", c8Key + i);
+		printf("%02hhX", c8Key[i]);
+	}
+	printf("\n");
+
+	printf("Code:\n");
 	btea((int32_t *)c8R, 4, (int32_t *)c8Key);
 	for (i = 0; i < 16; i++)
 	{

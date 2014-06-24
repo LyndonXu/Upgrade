@@ -342,7 +342,15 @@ void SSL_Init(void)
  */
 void SSL_Destory(void)
 {
+	void ENGINE_cleanup(void);
+	void CONF_modules_unload(int all);
 	ERR_free_strings();
+	ERR_remove_state(0);
+	ENGINE_cleanup();
+	CONF_modules_unload(1);
+	EVP_cleanup();
+	CRYPTO_cleanup_all_ex_data();
+//	SSL_free_COMP_methods();
 }
 
 /*
@@ -1414,6 +1422,11 @@ json_object *BuildupCmd_0xFB(char c8CloudR[RAND_NUM_CNT], char c8ClientR[RAND_NU
 	btea((int32_t *)c8CloudR, RAND_NUM_CNT / sizeof(int32_t), (int32_t *)c8Key);
 	{
 	char c8CloudBuf[36], c8ClientBuf[36];
+#if 0
+	char c8ClientID[36];
+	sprintf(c8ClientID + (i * 2), "%02hhX", c8ID[i]);
+	json_object_object_add(pJsonObj, "GatewayID", json_object_new_string(c8ClientID));
+#endif
 	int32_t i;
 	srand(time(NULL));
 	for (i = 0; i < RAND_NUM_CNT; i++)
